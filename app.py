@@ -81,64 +81,53 @@ def transcribe_audio(audio_content):
         return None
 
 # GPT-4 function
+from openai import OpenAI
+
 def get_ai_response(user_message, conversation_history, tutor_persona, topic, level):
     """
     Generate AI tutor response using OpenAI GPT-4o mini
-    
-    Args:
-        user_message: User's message
-        conversation_history: List of previous messages
-        tutor_persona: Selected tutor personality
-        topic: Current conversation topic
-        level: User's language level
-    
-    Returns:
-        str: AI response
+    Compatible with openai>=1.0.0
     """
     try:
-        init_openai_client()
-        
+        client = OpenAI(api_key=OPENAI_API_KEY)
+
         # System prompt based on tutor persona
         system_prompts = {
             "Friendly & Encouraging": f"""You are a friendly and encouraging language tutor. Your goal is to help 
 the user practice English conversation. Be patient, supportive, and provide gentle corrections when needed. 
 Keep responses conversational (2-4 sentences). Show enthusiasm and celebrate their progress.
 Current topic: {topic}. User level: {level}.""",
-            
+
             "Professional & Direct": f"""You are a professional language instructor focused on accuracy and 
 proper usage. Provide clear, direct feedback on grammar and vocabulary. Keep responses concise and educational.
 Be respectful but straightforward about corrections. Current topic: {topic}. User level: {level}.""",
-            
+
             "Casual & Fun": f"""You are a casual and fun language tutor who makes learning enjoyable. 
 Use idioms, humor, and relatable examples. Keep the conversation light and engaging while still being helpful.
 Keep responses conversational (2-4 sentences). Current topic: {topic}. User level: {level}."""
         }
-        
+
         system_prompt = system_prompts.get(tutor_persona, system_prompts["Friendly & Encouraging"])
-        
-        # Build messages for API
+
+        # Build messages
         messages = [{"role": "system", "content": system_prompt}]
-        
-        # Add conversation history (last 10 turns)
-        for msg in conversation_history[-10:]:
-            messages.append(msg)
-        
-        # Add current user message
+        messages.extend(conversation_history[-10:])
         messages.append({"role": "user", "content": user_message})
-        
-        # Call OpenAI API
-        response = openai.chat.completions.create(
+
+        # Call new API interface
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             max_tokens=500,
             temperature=0.7
         )
-        
+
         return response.choices[0].message.content
-    
+
     except Exception as e:
         st.error(f"AI response error: {str(e)}")
         return "I'm sorry, I encountered an error. Could you please try again?"
+
 
 # Text-to-Speech function
 def synthesize_speech(text, voice_name="en-US-Neural2-F"):
