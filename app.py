@@ -1,5 +1,6 @@
 import streamlit as st
 import openai
+from openai import OpenAI
 from google.cloud import speech_v1p1beta1 as speech
 from google.cloud import texttospeech
 import os
@@ -8,6 +9,7 @@ import base64
 from datetime import datetime
 import tempfile
 import dotenv
+
 
 # Page configuration
 st.set_page_config(
@@ -80,53 +82,47 @@ def transcribe_audio(audio_content):
         st.error(f"Transcription error: {str(e)}")
         return None
 
-# GPT-4 function
-from openai import OpenAI
+    # GPT-4 function
+def get_ai_response(user_input, conversation_history, persona, topic, level):
 
-def get_ai_response(user_message, conversation_history, tutor_persona, topic, level):
+    system_prompt = f"""
+    You are {persona}, an AI English speaking partner.
+    Your topic is "{topic}". You are helping the user practice {level}-level English conversation.
+    - Always reply naturally and contextually to the user's latest message.
+    - Do NOT repeat or rephrase your own previous messages.
+    - Do NOT generate both sides of a conversation.
+    - Respond as if in a friendly dialogue, short and engaging.
     """
-    Generate AI tutor response using OpenAI GPT-4o mini
-    Compatible with openai>=1.0.0
-    """
+
+    # Keep only the last few turns to avoid infinite recursion
+    trimmed_history = conversation_history[-6:] if len(conversation_history) > 6 else conversation_history
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(trimmed_history)
+    messages.append({"role": "user", "content": user_input})
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    # 🧠 Debug log of what is being sent
+    st.write("🔍 DEBUG: Messages sent to OpenAI:")
+    for i, msg in enumerate(messages):
+        st.write(f"Message {i}: {msg['role']} → {msg['content'][:200]}")
+
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-
-        # System prompt based on tutor persona
-        system_prompts = {
-            "Friendly & Encouraging": f"""You are a friendly and encouraging language tutor. Your goal is to help 
-the user practice English conversation. Be patient, supportive, and provide gentle corrections when needed. 
-Keep responses conversational (2-4 sentences). Show enthusiasm and celebrate their progress.
-Current topic: {topic}. User level: {level}.""",
-
-            "Professional & Direct": f"""You are a professional language instructor focused on accuracy and 
-proper usage. Provide clear, direct feedback on grammar and vocabulary. Keep responses concise and educational.
-Be respectful but straightforward about corrections. Current topic: {topic}. User level: {level}.""",
-
-            "Casual & Fun": f"""You are a casual and fun language tutor who makes learning enjoyable. 
-Use idioms, humor, and relatable examples. Keep the conversation light and engaging while still being helpful.
-Keep responses conversational (2-4 sentences). Current topic: {topic}. User level: {level}."""
-        }
-
-        system_prompt = system_prompts.get(tutor_persona, system_prompts["Friendly & Encouraging"])
-
-        # Build messages
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(conversation_history[-10:])
-        messages.append({"role": "user", "content": user_message})
-
-        # Call new API interface
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            max_tokens=500,
-            temperature=0.7
+            temperature=0.7,
         )
 
-        return response.choices[0].message.content
+        ai_message = response.choices[0].message.content.strip()
 
     except Exception as e:
-        st.error(f"AI response error: {str(e)}")
-        return "I'm sorry, I encountered an error. Could you please try again?"
+        st.error(f"❌ OpenAI API error: {e}")
+        ai_message = "Sorry, there was a problem generating a response."
+
+    return ai_message
+
 
 
 # Text-to-Speech function
@@ -308,67 +304,64 @@ def main():
     )
     
     # Process audio or text input
-    if process_button or text_input:
-        user_message = None
-        
-        # Process audio if uploaded
-        if audio_file and process_button:
-            with st.spinner("🎧 Transcribing your speech..."):
-                audio_bytes = audio_file.read()
-                user_message = transcribe_audio(audio_bytes)
-                
-                if not user_message:
-                    st.warning("Could not transcribe audio. Please try again or use text input.")
-        
-        # Process text input
-        elif text_input:
-            user_message = text_input
-        
-        # Generate AI response if we have a message
-        if user_message:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            
-            # Add user message to history
-            st.session_state.messages.append({
-                "role": "user",
-                "content": user_message,
-                "timestamp": timestamp
-            })
-            st.session_state.conversation_history.append({
-                "role": "user",
-                "content": user_message
-            })
-            
-            # Generate AI response
-            with st.spinner("🤔 AI is thinking..."):
-                ai_response = get_ai_response(
-                    user_message,
-                    st.session_state.conversation_history,
-                    persona,
-                    topic,
-                    level
-                )
-            
-            # Add AI response to history
-            ai_timestamp = datetime.now().strftime("%H:%M:%S")
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": ai_response,
-                "timestamp": ai_timestamp
-            })
-            st.session_state.conversation_history.append({
-                "role": "assistant",
-                "content": ai_response
-            })
-            
-            # Generate and play speech
-            with st.spinner("🔊 Generating speech..."):
-                audio_content = synthesize_speech(ai_response, selected_voice)
-                if audio_content:
-                    autoplay_audio(audio_content)
-            
-            # Rerun to update the display
-            st.rerun()
+    # Initialize input flag
+    if "last_user_message" not in st.session_state:
+        st.session_state.last_user_message = None
+
+    # Detect new input
+    new_message = None
+
+    # Process audio if uploaded and button pressed
+    if process_button and audio_file:
+        with st.spinner("🎧 Transcribing your speech..."):
+            audio_bytes = audio_file.read()
+            new_message = transcribe_audio(audio_bytes)
+            if not new_message:
+                st.warning("Could not transcribe audio. Please try again or use text input.")
+
+    # Process text input (only if new and not empty)
+    elif text_input and text_input.strip() and text_input != st.session_state.last_user_message:
+        new_message = text_input.strip()
+
+    # Handle AI interaction if there is a new message
+    if new_message:
+        st.session_state.last_user_message = new_message  # remember last input
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        # Add user message
+        st.session_state.messages.append({
+            "role": "user",
+            "content": new_message,
+            "timestamp": timestamp
+        })
+        st.session_state.conversation_history.append({
+            "role": "user",
+            "content": new_message
+        })
+
+        # Get AI response
+        with st.spinner("🤔 AI is thinking..."):
+            ai_response = get_ai_response(
+                new_message,
+                st.session_state.conversation_history,
+                persona,
+                topic,
+                level
+            )
+
+        ai_timestamp = datetime.now().strftime("%H:%M:%S")
+
+        # Add AI response
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": ai_response,
+            "timestamp": ai_timestamp
+        })
+
+        # Optional: play AI audio
+        audio_content = synthesize_speech(ai_response, voice_name=selected_voice)
+        autoplay_audio(audio_content)
+
     
     # Instructions
     if len(st.session_state.messages) == 0:
