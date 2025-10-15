@@ -7,6 +7,7 @@ import io
 import base64
 from datetime import datetime
 import tempfile
+import dotenv
 
 # Page configuration
 st.set_page_config(
@@ -22,8 +23,9 @@ if 'messages' not in st.session_state:
     st.session_state.messages = []
 
 # Configuration
-GOOGLE_CREDENTIALS_PATH = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+dotenv.load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
+GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api')
+OPENAI_API_KEY = os.getenv('openai_api_llm')
 
 # Initialize clients
 @st.cache_resource
@@ -236,8 +238,15 @@ def main():
             "Male Voice 1": "en-US-Neural2-D",
             "Male Voice 2": "en-US-Neural2-A"
         }
-        voice_selection = st.selectbox("AI Voice", list(voice_options.keys()))
+        # voice_selection = st.selectbox("AI Voice", list(voice_options.keys()))
+        # selected_voice = voice_options[voice_selection]
+        voice_keys = list(voice_options.keys())
+        voice_selection = st.selectbox("AI Voice", voice_keys, index=0)
+        if isinstance(voice_selection, int): 
+            # fallback safeguard
+            voice_selection = voice_keys[voice_selection]
         selected_voice = voice_options[voice_selection]
+
         
         st.markdown("---")
         
