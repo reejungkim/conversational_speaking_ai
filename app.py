@@ -4,12 +4,15 @@ from openai import OpenAI
 from google.cloud import speech_v1p1beta1 as speech
 from google.cloud import texttospeech
 import os
-import io
 import base64
 from datetime import datetime
-import tempfile
 import dotenv
 
+# Load environment variables
+dotenv.load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
+# Configuration
+GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api')
+OPENAI_API_KEY = os.getenv('openai_api_llm')
 
 # Page configuration
 st.set_page_config(
@@ -23,11 +26,12 @@ if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
 if 'messages' not in st.session_state:
     st.session_state.messages = []
+if 'last_user_message' not in st.session_state:
+    st.session_state.last_user_message = None
+if 'last_audio_file' not in st.session_state:
+    st.session_state.last_audio_file = None
 
-# Configuration
-dotenv.load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
-GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api')
-OPENAI_API_KEY = os.getenv('openai_api_llm')
+
 
 # Initialize clients
 @st.cache_resource
@@ -39,10 +43,6 @@ def init_speech_client():
 def init_tts_client():
     """Initialize Google Text-to-Speech client"""
     return texttospeech.TextToSpeechClient()
-
-def init_openai_client():
-    """Initialize OpenAI client"""
-    openai.api_key = OPENAI_API_KEY
 
 # Speech-to-Text function
 def transcribe_audio(audio_content):
@@ -60,8 +60,8 @@ def transcribe_audio(audio_content):
         
         audio = speech.RecognitionAudio(content=audio_content)
         config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
-            sample_rate_hertz=48000,
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000,
             language_code="en-US",
             enable_automatic_punctuation=True,
             model="default"
@@ -74,55 +74,80 @@ def transcribe_audio(audio_content):
         
         transcript = ""
         for result in response.results:
-            transcript += result.alternatives[0].transcript
+            if result.alternatives:
+                transcript += result.alternatives[0].transcript + " "
         
-        return transcript.strip()
+        return transcript.strip() if transcript else None
     
     except Exception as e:
-        st.error(f"Transcription error: {str(e)}")
+        st.error(f"❌ Transcription error: {str(e)}")
         return None
 
-    # GPT-4 function
+# GPT-4 function
 def get_ai_response(user_input, conversation_history, persona, topic, level):
-
-    system_prompt = f"""
-    You are {persona}, an AI English speaking partner.
-    Your topic is "{topic}". You are helping the user practice {level}-level English conversation.
-    - Always reply naturally and contextually to the user's latest message.
-    - Do NOT repeat or rephrase your own previous messages.
-    - Do NOT generate both sides of a conversation.
-    - Respond as if in a friendly dialogue, short and engaging.
     """
+    Generate AI tutor response using OpenAI GPT-4o mini
+    
+    Args:
+        user_input: User's message
+        conversation_history: List of previous messages
+        persona: Tutor personality
+        topic: Conversation topic
+        level: User's language level
+    
+    Returns:
+        str: AI response
+    """
+    
+    # Map persona to system prompt
+    persona_prompts = {
+        "Friendly & Encouraging": f"You are a friendly and encouraging English conversation partner. Be patient, supportive, and celebrate the user's efforts. Keep responses natural and conversational (2-4 sentences).",
+        "Professional & Direct": f"You are a professional English tutor focused on accuracy. Provide clear feedback and corrections when needed. Keep responses educational but friendly. Keep responses conversational (2-4 sentences).",
+        "Casual & Fun": f"You are a casual and fun English conversation partner. Use idioms, humor, and relatable examples. Keep the conversation light and engaging. Keep responses conversational (2-4 sentences)."
+    }
+    
+    system_prompt = f"""
+You are an English conversation partner with the following characteristics:
+- Personality: {persona_prompts.get(persona, persona_prompts['Friendly & Encouraging'])}
+- Current topic: {topic}
+- User's level: {level}
 
-    # Keep only the last few turns to avoid infinite recursion
+Instructions:
+1. Reply naturally to the user's message
+2. Stay on topic unless the user changes it
+3. Use vocabulary appropriate for their level
+4. Keep responses conversational and engaging
+5. Do NOT repeat your own previous messages
+6. Do NOT generate both sides of the conversation
+7. Do NOT ask multiple questions at once (max 1 question per response)
+"""
+
+    # Keep only the last 6 turns to maintain context without bloat
     trimmed_history = conversation_history[-6:] if len(conversation_history) > 6 else conversation_history
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(trimmed_history)
     messages.append({"role": "user", "content": user_input})
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
-    # 🧠 Debug log of what is being sent
-    st.write("🔍 DEBUG: Messages sent to OpenAI:")
-    for i, msg in enumerate(messages):
-        st.write(f"Message {i}: {msg['role']} → {msg['content'][:200]}")
-
     try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             temperature=0.7,
+            max_tokens=300
         )
 
         ai_message = response.choices[0].message.content.strip()
+        st.write(f"✅ AI Response received: {ai_message[:100]}...")
+        return ai_message
 
     except Exception as e:
-        st.error(f"❌ OpenAI API error: {e}")
-        ai_message = "Sorry, there was a problem generating a response."
-
-    return ai_message
-
+        error_msg = f"❌ OpenAI API error: {str(e)}"
+        st.error(error_msg)
+        st.write(f"Error details: {str(e)}")
+        return "Sorry, I encountered an issue. Could you please try again?"
 
 
 # Text-to-Speech function
@@ -162,7 +187,7 @@ def synthesize_speech(text, voice_name="en-US-Neural2-F"):
         return response.audio_content
     
     except Exception as e:
-        st.error(f"Text-to-speech error: {str(e)}")
+        st.error(f"❌ Text-to-speech error: {str(e)}")
         return None
 
 # Audio player helper
@@ -176,7 +201,7 @@ def autoplay_audio(audio_content):
     if audio_content:
         b64 = base64.b64encode(audio_content).decode()
         audio_html = f"""
-            <audio autoplay>
+            <audio autoplay style="width: 100%;">
                 <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
             </audio>
         """
@@ -194,13 +219,15 @@ def main():
         # Language Level
         level = st.selectbox(
             "Your Language Level",
-            ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"]
+            ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"],
+            key="language_level"
         )
         
         # Tutor Persona
         persona = st.selectbox(
             "Tutor Personality",
-            ["Friendly & Encouraging", "Professional & Direct", "Casual & Fun"]
+            ["Friendly & Encouraging", "Professional & Direct", "Casual & Fun"],
+            key="tutor_persona"
         )
         
         # Conversation Topic
@@ -213,7 +240,8 @@ def main():
                 "Travel & Tourism",
                 "Everyday Small Talk",
                 "Shopping & Errands"
-            ]
+            ],
+            key="conversation_topic"
         )
         
         # Voice Selection
@@ -223,13 +251,11 @@ def main():
             "Male Voice 1": "en-US-Neural2-D",
             "Male Voice 2": "en-US-Neural2-A"
         }
-        # voice_selection = st.selectbox("AI Voice", list(voice_options.keys()))
-        # selected_voice = voice_options[voice_selection]
-        voice_keys = list(voice_options.keys())
-        voice_selection = st.selectbox("AI Voice", voice_keys, index=0)
-        if isinstance(voice_selection, int): 
-            # fallback safeguard
-            voice_selection = voice_keys[voice_selection]
+        voice_selection = st.selectbox(
+            "AI Voice",
+            list(voice_options.keys()),
+            key="voice_selection"
+        )
         selected_voice = voice_options[voice_selection]
 
         
@@ -239,6 +265,8 @@ def main():
         if st.button("🔄 Reset Conversation", use_container_width=True):
             st.session_state.conversation_history = []
             st.session_state.messages = []
+            st.session_state.last_user_message = None
+            st.session_state.last_audio_file = None
             st.rerun()
         
         st.markdown("---")
@@ -247,11 +275,11 @@ def main():
     
     # Check if API keys are configured
     if not OPENAI_API_KEY:
-        st.error("⚠️ OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+        st.error("⚠️ OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.")
         st.stop()
     
     if not GOOGLE_CREDENTIALS_PATH:
-        st.error("⚠️ Google Cloud credentials not found. Please set the GOOGLE_APPLICATION_CREDENTIALS environment variable.")
+        st.error("⚠️ Google Cloud credentials not found. Please set GOOGLE_APPLICATION_CREDENTIALS in your .env file.")
         st.stop()
     
     # Main conversation area
@@ -260,25 +288,41 @@ def main():
     # Display conversation history
     chat_container = st.container()
     with chat_container:
-        for message in st.session_state.messages:
-            role = message["role"]
-            content = message["content"]
-            timestamp = message.get("timestamp", "")
+        if len(st.session_state.messages) == 0:
+            st.info("""
+            👋 **Welcome! Here's how to get started:**
             
-            if role == "user":
-                st.markdown(f"""
-                <div style='background-color: #e3f2fd; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                    <strong>🙋 You</strong> <span style='color: #666; font-size: 0.8em;'>{timestamp}</span><br>
-                    {content}
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div style='background-color: #f5f5f5; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                    <strong>🤖 AI Tutor</strong> <span style='color: #666; font-size: 0.8em;'>{timestamp}</span><br>
-                    {content}
-                </div>
-                """, unsafe_allow_html=True)
+            1. Configure your preferences in the sidebar (language level, tutor personality, topic)
+            2. Click the audio uploader and record your voice, or upload an audio file
+            3. Click "Send" to submit your audio
+            4. Alternatively, type your message in the text box below
+            5. The AI tutor will respond with both text and speech!
+            
+            **Tips:**
+            - Speak clearly and at a normal pace
+            - If audio doesn't work, use the text input as a backup
+            - Don't worry about mistakes - the tutor is here to help!
+            """)
+        else:
+            for message in st.session_state.messages:
+                role = message["role"]
+                content = message["content"]
+                timestamp = message.get("timestamp", "")
+                
+                if role == "user":
+                    st.markdown(f"""
+                    <div style='background-color: #e3f2fd; padding: 15px; border-radius: 10px; margin: 10px 0;'>
+                        <strong>🙋 You</strong> <span style='color: #666; font-size: 0.8em;'>{timestamp}</span><br>
+                        {content}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style='background-color: #f5f5f5; padding: 15px; border-radius: 10px; margin: 10px 0;'>
+                        <strong>🤖 AI Tutor</strong> <span style='color: #666; font-size: 0.8em;'>{timestamp}</span><br>
+                        {content}
+                    </div>
+                    """, unsafe_allow_html=True)
     
     # Audio input section
     st.markdown("---")
@@ -291,7 +335,8 @@ def main():
         audio_file = st.file_uploader(
             "Record or upload your audio",
             type=["wav", "mp3", "webm", "ogg", "m4a"],
-            help="Click to record audio or upload an audio file"
+            help="Click to record audio or upload an audio file",
+            key="audio_upload"
         )
     
     with col2:
@@ -300,15 +345,11 @@ def main():
     # Text input as alternative
     text_input = st.text_input(
         "Or type your message here (if voice isn't working)",
-        placeholder="Type your message and press Enter..."
+        placeholder="Type your message and press Enter...",
+        key="text_input"
     )
     
     # Process audio or text input
-    # Initialize input flag
-    if "last_user_message" not in st.session_state:
-        st.session_state.last_user_message = None
-
-    # Detect new input
     new_message = None
 
     # Process audio if uploaded and button pressed
@@ -325,7 +366,7 @@ def main():
 
     # Handle AI interaction if there is a new message
     if new_message:
-        st.session_state.last_user_message = new_message  # remember last input
+        st.session_state.last_user_message = new_message
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Add user message
@@ -351,34 +392,27 @@ def main():
 
         ai_timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # Add AI response
+        # Add AI response to session state
         st.session_state.messages.append({
             "role": "assistant",
             "content": ai_response,
             "timestamp": ai_timestamp
         })
-
-        # Optional: play AI audio
-        audio_content = synthesize_speech(ai_response, voice_name=selected_voice)
-        autoplay_audio(audio_content)
-
-    
-    # Instructions
-    if len(st.session_state.messages) == 0:
-        st.info("""
-        👋 **Welcome! Here's how to get started:**
         
-        1. Configure your preferences in the sidebar (language level, tutor personality, topic)
-        2. Click the audio uploader and record your voice, or upload an audio file
-        3. Click "Send" to submit your audio
-        4. Alternatively, type your message in the text box below
-        5. The AI tutor will respond with both text and speech!
-        
-        **Tips:**
-        - Speak clearly and at a normal pace
-        - If audio doesn't work, use the text input as a backup
-        - Don't worry about mistakes - the tutor is here to help!
-        """)
+        # Add to conversation history for context
+        st.session_state.conversation_history.append({
+            "role": "assistant",
+            "content": ai_response
+        })
+
+        # Generate and play speech
+        with st.spinner("🔊 Generating speech..."):
+            audio_content = synthesize_speech(ai_response, voice_name=selected_voice)
+            if audio_content:
+                autoplay_audio(audio_content)
+
+        # Rerun to refresh the UI and clear inputs
+        st.rerun()
 
 if __name__ == "__main__":
     main()
