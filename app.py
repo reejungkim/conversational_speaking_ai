@@ -311,14 +311,14 @@ def main():
                 
                 if role == "user":
                     st.markdown(f"""
-                    <div style='background-color: #e3f2fd; padding: 15px; border-radius: 10px; margin: 10px 0;'>
+                    <div style='background-color: #e3f2fd; padding: 15px; border-radius: 10px; margin: 10px 0; color: #000000;'>
                         <strong>🙋 You</strong> <span style='color: #666; font-size: 0.8em;'>{timestamp}</span><br>
                         {content}
                     </div>
                     """, unsafe_allow_html=True)
                 else:
                     st.markdown(f"""
-                    <div style='background-color: #f5f5f5; padding: 15px; border-radius: 10px; margin: 10px 0;'>
+                    <div style='background-color: #f5f5f5; padding: 15px; border-radius: 10px; margin: 10px 0; color: #000000;'>
                         <strong>🤖 AI Tutor</strong> <span style='color: #666; font-size: 0.8em;'>{timestamp}</span><br>
                         {content}
                     </div>
