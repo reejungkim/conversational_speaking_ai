@@ -1,0 +1,480 @@
+Product Requirements Document (PRD)
+AI-Powered Language Learning Platform - MVP
+
+1. Executive Summary
+Product Vision
+Build a conversational AI language tutor platform that enables users to practice speaking and listening in their target language through realistic, interactive conversations with AI tutors.
+Success Criteria
+
+Users can complete end-to-end conversations with AI tutors
+Speech recognition accuracy > 85%
+Response latency < 3 seconds
+Platform successfully deployed and accessible via Streamlit
+
+
+2. Product Overview
+2.1 Problem Statement
+Language learners struggle to find affordable, accessible, and judgment-free environments to practice speaking skills. Traditional tutoring is expensive and scheduling-dependent, while existing apps lack authentic conversational practice.
+2.2 Target Users
+
+Primary: Adult language learners (18-45 years)
+Secondary: Students preparing for language proficiency tests
+Initial Focus: English language learners
+
+2.3 Value Proposition
+
+24/7 Availability: Practice anytime without scheduling
+Judgment-Free Environment: Build confidence without embarrassment
+Immediate Feedback: Real-time corrections and suggestions
+Cost-Effective: Significantly cheaper than human tutors
+
+
+3. MVP Scope
+3.1 Core Features (In Scope)
+Feature 1: Voice Conversation Interface
+Description: Real-time voice-based conversation with AI tutor
+User Stories:
+
+As a user, I can speak into my microphone and have my speech transcribed
+As a user, I can hear the AI tutor's response in natural-sounding speech
+As a user, I can see a transcript of our conversation
+
+Requirements:
+
+Voice input capture via browser microphone
+Real-time audio streaming or file upload
+Clear visual indicators (recording, processing, playing)
+Conversation history display with timestamps
+
+Feature 2: AI Tutor Persona
+Description: Configurable AI tutor with specific teaching personality
+User Stories:
+
+As a user, I can select a tutor persona (e.g., friendly, professional, patient)
+As a user, I receive responses appropriate to my language level
+As a user, I engage in contextually relevant conversations
+
+Requirements:
+
+At least 2-3 preset tutor personas
+System prompt engineering for consistent personality
+Context-aware responses based on conversation history
+
+Feature 3: Conversation Topics
+Description: Structured conversation scenarios
+User Stories:
+
+As a user, I can choose from predefined conversation topics
+As a user, I can practice common real-world scenarios
+As a user, I can request to change topics mid-conversation
+
+Requirements:
+
+Minimum 5 conversation topics (e.g., "Restaurant Ordering", "Job Interview", "Travel", "Small Talk", "Shopping")
+Topic-specific vocabulary and scenarios
+Ability to free-form conversation
+
+Feature 4: Basic Feedback System
+Description: Simple corrections and suggestions during conversation
+User Stories:
+
+As a user, I receive corrections for major grammatical errors
+As a user, I can see alternative ways to express my ideas
+As a user, I receive vocabulary suggestions
+
+Requirements:
+
+Grammar error detection in user input
+Alternative phrasing suggestions
+Display corrections in chat interface
+
+3.2 Out of Scope (Future Versions)
+
+User authentication and profiles
+Progress tracking and analytics
+Multiple language support (beyond English)
+Advanced pronunciation analysis
+Gamification elements
+Mobile app versions
+Payment processing
+Lesson planning and curriculum
+Community features
+Video avatars for tutors
+
+
+4. Technical Architecture
+4.1 Technology Stack
+Frontend Framework:
+
+Streamlit (Python-based web framework)
+
+Speech-to-Text (STT):
+
+Google Cloud Speech-to-Text API
+Real-time streaming or audio file processing
+Language detection and models
+
+Language Model (LLM):
+
+OpenAI GPT-4o mini
+Context window management
+Prompt engineering for tutoring
+
+Text-to-Speech (TTS):
+
+Google Cloud Text-to-Speech API
+Multiple voice options
+Natural speech synthesis
+
+Hosting:
+
+Streamlit Cloud (for quick deployment)
+Alternative: Local deployment initially
+
+4.2 System Architecture
+User Browser
+    ↓
+Streamlit Frontend
+    ↓
+┌─────────────────────────────────┐
+│   Application Logic (Python)    │
+├─────────────────────────────────┤
+│  - Audio Input Handler          │
+│  - Conversation Manager          │
+│  - Feedback Generator            │
+└─────────────────────────────────┘
+    ↓          ↓          ↓
+Google STT  OpenAI API  Google TTS
+```
+
+### 4.3 Data Flow
+
+1. **User speaks** → Audio captured in browser
+2. **Audio sent to Google STT** → Transcribed text returned
+3. **Text sent to GPT-4o mini** → AI response generated
+4. **Response sent to Google TTS** → Audio file generated
+5. **Audio played** → User hears tutor response
+6. **Cycle repeats**
+
+### 4.4 API Requirements
+
+**Google Cloud Speech-to-Text**:
+- API key/credentials required
+- Supported audio formats: WAV, FLAC, MP3
+- Language models: English (US, UK, etc.)
+- Features: Enhanced models for better accuracy
+
+**OpenAI API**:
+- API key required
+- Model: gpt-4o-mini
+- Max tokens: ~500-1000 per response
+- Temperature: 0.7-0.8 for natural conversation
+
+**Google Cloud Text-to-Speech**:
+- API key/credentials required
+- Voice selection (e.g., en-US-Wavenet-D)
+- Audio format: MP3 or WAV
+- Speaking rate and pitch adjustment
+
+---
+
+## 5. User Experience
+
+### 5.1 User Flow
+```
+Landing Page
+    ↓
+Select Language Level (Beginner/Intermediate/Advanced)
+    ↓
+Choose Conversation Topic
+    ↓
+Select Tutor Persona
+    ↓
+Start Conversation
+    ↓
+[Voice Input] → [AI Response] → [Feedback] → [Continue]
+    ↓
+End Session / Change Topic
+```
+
+### 5.2 UI Components
+
+**Main Conversation Screen**:
+- Large "Press to Talk" button
+- Real-time recording indicator
+- Conversation transcript panel
+- Feedback/correction panel (collapsible)
+- Topic and tutor info display
+- Session controls (restart, change topic, end)
+
+**Configuration Panel**:
+- Language level selector
+- Topic dropdown/cards
+- Tutor persona selector
+- Settings (voice speed, volume)
+
+### 5.3 Error Handling
+
+**Audio Input Errors**:
+- Microphone permission denied
+- No audio detected
+- Audio quality too poor
+
+**API Errors**:
+- STT transcription failed
+- LLM response timeout
+- TTS generation failed
+- Rate limit exceeded
+
+**User Guidance**:
+- Clear error messages
+- Suggested actions
+- Fallback to text-only mode if voice fails
+
+---
+
+## 6. Functional Requirements
+
+### 6.1 Audio Processing
+
+| Requirement | Priority | Description |
+|------------|----------|-------------|
+| FR-1.1 | P0 | System captures audio from user's microphone |
+| FR-1.2 | P0 | Audio is processed in chunks or as complete file |
+| FR-1.3 | P1 | System provides visual feedback during recording |
+| FR-1.4 | P1 | User can control recording (start/stop) |
+| FR-1.5 | P2 | System handles background noise |
+
+### 6.2 Conversation Management
+
+| Requirement | Priority | Description |
+|------------|----------|-------------|
+| FR-2.1 | P0 | System maintains conversation context (last 10 turns minimum) |
+| FR-2.2 | P0 | AI responses are contextually relevant |
+| FR-2.3 | P1 | System adapts difficulty to user level |
+| FR-2.4 | P1 | Conversation can be reset/restarted |
+| FR-2.5 | P2 | System detects and handles topic changes |
+
+### 6.3 Feedback Generation
+
+| Requirement | Priority | Description |
+|------------|----------|-------------|
+| FR-3.1 | P0 | System identifies grammatical errors |
+| FR-3.2 | P1 | System provides corrections |
+| FR-3.3 | P1 | System suggests vocabulary improvements |
+| FR-3.4 | P2 | Feedback is non-intrusive (optional view) |
+
+### 6.4 Response Generation
+
+| Requirement | Priority | Description |
+|------------|----------|-------------|
+| FR-4.1 | P0 | AI generates natural, conversational responses |
+| FR-4.2 | P0 | Responses are appropriate to selected topic |
+| FR-4.3 | P1 | Responses match tutor persona |
+| FR-4.4 | P1 | Response length is conversational (2-4 sentences) |
+
+---
+
+## 7. Non-Functional Requirements
+
+### 7.1 Performance
+
+| Requirement | Target | Description |
+|------------|--------|-------------|
+| NFR-1.1 | < 2s | STT processing latency |
+| NFR-1.2 | < 2s | LLM response generation time |
+| NFR-1.3 | < 1s | TTS audio generation time |
+| NFR-1.4 | < 5s | Total end-to-end conversation turn time |
+
+### 7.2 Reliability
+
+| Requirement | Target | Description |
+|------------|--------|-------------|
+| NFR-2.1 | 95% | STT transcription accuracy |
+| NFR-2.2 | 99% | API availability |
+| NFR-2.3 | 100% | Graceful error handling |
+
+### 7.3 Usability
+
+| Requirement | Description |
+|------------|-------------|
+| NFR-3.1 | Interface is intuitive without instructions |
+| NFR-3.2 | Visual feedback for all system states |
+| NFR-3.3 | Mobile-responsive design (Streamlit default) |
+
+### 7.4 Security & Privacy
+
+| Requirement | Description |
+|------------|-------------|
+| NFR-4.1 | API keys stored securely (environment variables) |
+| NFR-4.2 | No permanent storage of audio files |
+| NFR-4.3 | Conversation data not logged persistently |
+
+---
+
+## 8. MVP Features Breakdown
+
+### Phase 1: Basic Conversation (Week 1-2)
+- ✅ Streamlit app setup
+- ✅ Google STT integration
+- ✅ OpenAI GPT-4o mini integration
+- ✅ Google TTS integration
+- ✅ Basic voice input/output flow
+- ✅ Simple conversation history display
+
+### Phase 2: Enhanced UX (Week 3)
+- ✅ Tutor persona selection (2-3 options)
+- ✅ Topic selection (5 topics)
+- ✅ Improved UI with better controls
+- ✅ Error handling and user feedback
+
+### Phase 3: Feedback System (Week 4)
+- ✅ Grammar error detection
+- ✅ Correction suggestions
+- ✅ Vocabulary recommendations
+- ✅ Feedback display panel
+
+---
+
+## 9. Configuration & Settings
+
+### 9.1 Environment Variables Required
+```
+GOOGLE_CLOUD_CREDENTIALS_PATH
+OPENAI_API_KEY
+```
+
+### 9.2 Tutor Personas (Initial Set)
+1. **Friendly & Encouraging**: Patient, positive reinforcement
+2. **Professional & Direct**: Formal, focused on accuracy
+3. **Casual & Fun**: Relaxed, uses idioms and humor
+
+### 9.3 Conversation Topics (Initial Set)
+1. **Restaurant & Ordering Food**
+2. **Job Interview Practice**
+3. **Travel & Tourism**
+4. **Everyday Small Talk**
+5. **Shopping & Errands**
+
+### 9.4 Language Levels
+- **Beginner (A1-A2)**: Simple vocabulary, short sentences
+- **Intermediate (B1-B2)**: Broader vocabulary, complex sentences
+- **Advanced (C1-C2)**: Sophisticated language, nuanced discussions
+
+---
+
+## 10. Success Metrics
+
+### 10.1 Technical Metrics
+- API uptime: > 99%
+- Average response time: < 5 seconds
+- Error rate: < 5%
+- STT accuracy: > 85%
+
+### 10.2 User Experience Metrics
+- Average conversation length: > 5 turns
+- Session completion rate: > 60%
+- Error recovery rate: > 90%
+
+### 10.3 MVP Validation Criteria
+- Successfully processes 10 consecutive conversations without critical errors
+- Positive feedback from 5 beta testers
+- All core features functional and accessible
+
+---
+
+## 11. Dependencies & Risks
+
+### 11.1 External Dependencies
+- Google Cloud Platform account and billing
+- OpenAI API account and credits
+- Stable internet connection for users
+- Browser microphone access permissions
+
+### 11.2 Technical Risks
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| API cost overruns | High | Implement usage tracking and limits |
+| Audio quality issues | Medium | Provide audio quality requirements |
+| Latency problems | Medium | Optimize API calls, add loading states |
+| Browser compatibility | Low | Test on major browsers, provide requirements |
+
+### 11.3 Assumptions
+- Users have working microphone and speakers
+- Users have stable internet (min 1 Mbps)
+- Users grant browser microphone permissions
+- API services remain available and pricing stable
+
+---
+
+## 12. Future Enhancements (Post-MVP)
+
+### Version 2.0 Features
+- User authentication and profiles
+- Progress tracking dashboard
+- Multiple language support
+- Advanced pronunciation analysis with phonetic feedback
+- Conversation recording and replay
+- Custom topic creation
+- Spaced repetition vocabulary system
+
+### Version 3.0 Features
+- Mobile native apps (iOS/Android)
+- Video avatars for tutors
+- Real-time conversation mode (lower latency)
+- Group conversation practice
+- Integration with language proficiency tests
+- Gamification (points, achievements, streaks)
+
+---
+
+## 13. Appendix
+
+### 13.1 Sample System Prompts
+
+**Friendly Tutor**:
+```
+You are a friendly and encouraging language tutor. Your goal is to help 
+the user practice English conversation. Be patient, supportive, and 
+provide gentle corrections. Keep responses conversational (2-4 sentences). 
+Current topic: {topic}. User level: {level}.
+```
+
+**Professional Tutor**:
+```
+You are a professional language instructor focused on accuracy and 
+proper usage. Provide clear, direct feedback on grammar and vocabulary. 
+Keep responses concise and educational. Current topic: {topic}. 
+User level: {level}.
+13.2 Sample Topics with Context
+Restaurant Ordering:
+
+Scenario: User is at a restaurant and needs to order food
+Key vocabulary: menu, appetizer, main course, dessert, bill
+Common phrases: "I'd like to order...", "Could I have...", "What do you recommend?"
+
+Job Interview:
+
+Scenario: User is being interviewed for a position
+Key vocabulary: experience, qualifications, strengths, weaknesses
+Common phrases: "Tell me about yourself", "Why should we hire you?"
+
+13.3 Technical Specifications
+Audio Format:
+
+Input: WAV or WEBM (browser recording)
+Sample rate: 16kHz minimum
+Channels: Mono
+Bit depth: 16-bit
+
+API Rate Limits to Consider:
+
+Google STT: 1000 requests/min
+OpenAI: 10,000 requests/min (tier dependent)
+Google TTS: 1000 requests/min
+
+
+Document Version: 1.0
+Last Updated: October 15, 2025
+Status: Ready for Development
