@@ -7,6 +7,9 @@ import os
 import base64
 from datetime import datetime
 import dotenv
+import io
+import wave
+from streamlit_mic_recorder import mic_recorder
 
 # Load environment variables
 dotenv.load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
@@ -57,11 +60,18 @@ def transcribe_audio(audio_content):
     """
     try:
         client = init_speech_client()
-        
+        # Try to detect WAV sample rate from bytes; fall back to 16000Hz
+        detected_sample_rate = 16000
+        try:
+            with wave.open(io.BytesIO(audio_content), 'rb') as wav_file:
+                detected_sample_rate = wav_file.getframerate()
+        except Exception:
+            pass
+
         audio = speech.RecognitionAudio(content=audio_content)
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000,
+            sample_rate_hertz=detected_sample_rate,
             language_code="en-US",
             enable_automatic_punctuation=True,
             model="default"
@@ -328,19 +338,14 @@ def main():
     st.markdown("---")
     st.markdown("### 🎤 Your Turn to Speak")
     
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # Audio recorder
-        audio_file = st.file_uploader(
-            "Record or upload your audio",
-            type=["wav", "mp3", "webm", "ogg", "m4a"],
-            help="Click to record audio or upload an audio file",
-            key="audio_upload"
-        )
-    
-    with col2:
-        process_button = st.button("🚀 Send", use_container_width=True, type="primary")
+    # Microphone recorder (records to WAV), auto-process on stop
+    st.markdown("Click to start recording, speak, then stop to send.")
+    audio_data = mic_recorder(
+        start_prompt="🎙️ Start recording",
+        stop_prompt="⏹️ Stop",
+        key="mic_recorder",
+        format="wav"
+    )
     
     # Text input as alternative
     text_input = st.text_input(
@@ -352,10 +357,10 @@ def main():
     # Process audio or text input
     new_message = None
 
-    # Process audio if uploaded and button pressed
-    if process_button and audio_file:
+    # Process mic audio automatically when available
+    if audio_data and isinstance(audio_data, dict) and audio_data.get('bytes'):
         with st.spinner("🎧 Transcribing your speech..."):
-            audio_bytes = audio_file.read()
+            audio_bytes = audio_data['bytes']
             new_message = transcribe_audio(audio_bytes)
             if not new_message:
                 st.warning("Could not transcribe audio. Please try again or use text input.")
