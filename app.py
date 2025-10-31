@@ -343,8 +343,7 @@ def main():
     audio_data = mic_recorder(
         start_prompt="🎙️ Start recording",
         stop_prompt="⏹️ Stop",
-        key="mic_recorder",
-        format="wav"
+        key="mic_recorder"
     )
     
     # Text input as alternative
