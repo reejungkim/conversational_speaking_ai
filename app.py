@@ -10,12 +10,34 @@ import dotenv
 import io
 import wave
 from streamlit_mic_recorder import mic_recorder
+import tempfile
 
 # Load environment variables
 dotenv.load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
 # Configuration
 GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api')
 OPENAI_API_KEY = os.getenv('openai_api_llm')
+
+# Ensure Google ADC env var is exported for client libraries using either a file path or raw JSON
+if GOOGLE_CREDENTIALS_PATH:
+    try:
+        # If it's a valid file path, use it directly
+        if os.path.isfile(GOOGLE_CREDENTIALS_PATH):
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GOOGLE_CREDENTIALS_PATH
+        else:
+            # If it looks like JSON content, write to a temp file and point ADC to it
+            stripped = GOOGLE_CREDENTIALS_PATH.strip()
+            if stripped.startswith('{') and stripped.endswith('}'):
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
+                tmp.write(stripped.encode('utf-8'))
+                tmp.flush()
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
+                tmp.close()
+    except Exception:
+        pass
+
+print(GOOGLE_CREDENTIALS_PATH)
+print(OPENAI_API_KEY)
 
 # Page configuration
 st.set_page_config(
@@ -33,6 +55,8 @@ if 'last_user_message' not in st.session_state:
     st.session_state.last_user_message = None
 if 'last_audio_file' not in st.session_state:
     st.session_state.last_audio_file = None
+if 'google_credentials_set' not in st.session_state:
+    st.session_state.google_credentials_set = bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'))
 
 
 
@@ -268,6 +292,39 @@ def main():
         )
         selected_voice = voice_options[voice_selection]
 
+        # Google Credentials setup UI
+        with st.expander("Google Cloud Credentials"):
+            st.write("Provide a service account JSON path or paste raw JSON.")
+            mode = st.radio("Input type", ["Path", "JSON"], horizontal=True, key="adc_mode")
+            if mode == "Path":
+                cred_path = st.text_input("Service account JSON path", value="", key="adc_path")
+            else:
+                cred_json = st.text_area("Service account JSON (raw)", value="", height=150, key="adc_json")
+            if st.button("Save credentials", use_container_width=True, key="adc_save_btn"):
+                try:
+                    if mode == "Path" and cred_path:
+                        if os.path.isfile(cred_path):
+                            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = cred_path
+                            st.session_state.google_credentials_set = True
+                            st.success("Google credentials saved (path).")
+                        else:
+                            st.error("Path not found. Please check the file path.")
+                    elif mode == "JSON" and cred_json:
+                        stripped = cred_json.strip()
+                        if stripped.startswith('{') and stripped.endswith('}'):
+                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
+                            tmp.write(stripped.encode('utf-8'))
+                            tmp.flush()
+                            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
+                            st.session_state.google_credentials_set = True
+                            tmp.close()
+                            st.success("Google credentials saved (JSON).")
+                        else:
+                            st.error("Invalid JSON content.")
+                    else:
+                        st.warning("Please provide credentials in the selected format.")
+                except Exception as e:
+                    st.error(f"Failed to save credentials: {e}")
         
         st.markdown("---")
         
@@ -288,8 +345,8 @@ def main():
         st.error("⚠️ OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.")
         st.stop()
     
-    if not GOOGLE_CREDENTIALS_PATH:
-        st.error("⚠️ Google Cloud credentials not found. Please set GOOGLE_APPLICATION_CREDENTIALS in your .env file.")
+    if not (os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or st.session_state.get('google_credentials_set')):
+        st.error("⚠️ Google Cloud credentials not found. Use the 'Google Cloud Credentials' panel to set a path or JSON, or set 'gemini_llm_api'/'GOOGLE_APPLICATION_CREDENTIALS' in your .env.")
         st.stop()
     
     # Main conversation area
