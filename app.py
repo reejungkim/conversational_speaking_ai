@@ -6,14 +6,14 @@ from google.cloud import texttospeech
 import os
 import base64
 from datetime import datetime
-import dotenv
+from dotenv import load_dotenv 
 import io
 import wave
 from streamlit_mic_recorder import mic_recorder
 import tempfile
 
 # Load environment variables
-dotenv.load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
+load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
 # Configuration
 GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api')
 OPENAI_API_KEY = os.getenv('openai_api_llm')
@@ -35,9 +35,6 @@ if GOOGLE_CREDENTIALS_PATH:
                 tmp.close()
     except Exception:
         pass
-
-print(GOOGLE_CREDENTIALS_PATH)
-print(OPENAI_API_KEY)
 
 # Page configuration
 st.set_page_config(
@@ -164,7 +161,22 @@ Instructions:
     messages.append({"role": "user", "content": user_input})
 
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        # Check if API key is available
+        if not OPENAI_API_KEY:
+            error_msg = "❌ OpenAI API key is missing. Please set OPENAI_API_KEY in your .env file or environment."
+            st.error(error_msg)
+            return "Sorry, I encountered an issue. Could you please try again?"
+        
+        # Clean and validate API key
+        api_key = str(OPENAI_API_KEY).strip()
+        if not api_key or len(api_key) < 10:
+            error_msg = "❌ OpenAI API key appears to be invalid or too short."
+            st.error(error_msg)
+            return "Sorry, I encountered an issue. Could you please try again?"
+        
+        # Initialize client with only the api_key parameter
+        # Ensure we're not passing any unexpected arguments
+        client = OpenAI(api_key=api_key)
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -173,15 +185,40 @@ Instructions:
             max_tokens=300
         )
 
+        if not response.choices or not response.choices[0].message:
+            error_msg = "❌ OpenAI API returned an empty response."
+            st.error(error_msg)
+            return "Sorry, I encountered an issue. Could you please try again?"
+
         ai_message = response.choices[0].message.content.strip()
+        if not ai_message:
+            error_msg = "❌ OpenAI API returned empty content."
+            st.error(error_msg)
+            return "Sorry, I encountered an issue. Could you please try again?"
+            
         st.write(f"✅ AI Response received: {ai_message[:100]}...")
         return ai_message
 
     except Exception as e:
-        error_msg = f"❌ OpenAI API error: {str(e)}"
-        st.error(error_msg)
-        st.write(f"Error details: {str(e)}")
-        return "Sorry, I encountered an issue. Could you please try again?"
+        error_type = type(e).__name__
+        error_str = str(e)
+        
+        # Check for specific error types
+        if "authentication" in error_str.lower() or "api key" in error_str.lower() or "invalid" in error_str.lower():
+            error_msg = f"❌ OpenAI Authentication Error: Invalid API key. Please check your OPENAI_API_KEY.\n\nError: {error_str}"
+            st.error(error_msg)
+            st.exception(e)
+            return "Sorry, I encountered an authentication issue. Please check your API key."
+        elif "rate limit" in error_str.lower() or "too many" in error_str.lower():
+            error_msg = f"❌ OpenAI Rate Limit Error: Too many requests. Please wait a moment and try again.\n\nError: {error_str}"
+            st.error(error_msg)
+            st.exception(e)
+            return "Sorry, I'm receiving too many requests. Please wait a moment and try again."
+        else:
+            error_msg = f"❌ OpenAI API Error ({error_type}): {error_str}"
+            st.error(error_msg)
+            st.exception(e)
+            return f"Sorry, I encountered an issue: {error_str[:100]}. Could you please try again?"
 
 
 # Text-to-Speech function
