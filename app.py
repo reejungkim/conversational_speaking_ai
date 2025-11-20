@@ -440,6 +440,11 @@ def main():
         key="mic_recorder"
     )
     
+    # Reset the text input on the next run if flagged
+    if st.session_state.get("reset_text_input"):
+        st.session_state["text_input"] = ""
+        st.session_state["reset_text_input"] = False
+
     # Text input as alternative
     text_input = st.text_input(
         "Or type your message here (if voice isn't working)",
@@ -461,6 +466,8 @@ def main():
     # Process text input (only if new and not empty)
     elif text_input and text_input.strip() and text_input != st.session_state.last_user_message:
         new_message = text_input.strip()
+        # Flag to clear the text input on the next run
+        st.session_state.reset_text_input = True
 
     # Handle AI interaction if there is a new message
     if new_message:
