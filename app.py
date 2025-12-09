@@ -404,11 +404,6 @@ def main():
             
             if creds_value:
                 st.success(f"✅ Google credentials loaded from {creds_source}")
-                # Only show partial path for security
-                if len(creds_value) > 50:
-                    st.info(f"Using: ...{creds_value[-30:]}")
-                else:
-                    st.info(f"Using: {creds_value}")
             else:
                 st.warning("⚠️ Google credentials not found")
                 st.info("💡 **For Streamlit Cloud:** Add to Secrets: `gemini_llm_api` or `GOOGLE_APPLICATION_CREDENTIALS`")
