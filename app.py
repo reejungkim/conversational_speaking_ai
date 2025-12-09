@@ -16,12 +16,58 @@ import tempfile
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(APP_DIR, '.env')
 
-# Load environment variables from .env file in the same directory as app.py
+# Load environment variables from .env file (for local development)
+# This will be ignored on Streamlit Cloud where secrets are used instead
 load_dotenv(ENV_PATH)
 
-# Configuration
-GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-OPENAI_API_KEY = os.getenv('openai_api_llm') or os.getenv('OPENAI_API_KEY')
+# Configuration: Check Streamlit secrets first (for Streamlit Cloud), then fall back to environment variables (for local)
+def get_config_value(secret_keys, env_keys):
+    """
+    Get configuration value from Streamlit secrets (Cloud) or environment variables (local)
+    
+    Args:
+        secret_keys: Single key or list of keys to look up in st.secrets
+        env_keys: List of environment variable names to try
+    
+    Returns:
+        Configuration value or None
+    """
+    # Normalize secret_keys to a list
+    if isinstance(secret_keys, str):
+        secret_keys = [secret_keys]
+    
+    # Try Streamlit secrets first (for Streamlit Cloud)
+    try:
+        if hasattr(st, 'secrets'):
+            for secret_key in secret_keys:
+                if secret_key in st.secrets:
+                    value = st.secrets[secret_key]
+                    if value:
+                        value = str(value).strip()
+                        if value:
+                            return value
+    except Exception:
+        pass
+    
+    # Fall back to environment variables (for local development)
+    for env_key in env_keys:
+        value = os.getenv(env_key)
+        if value:
+            value = value.strip()
+            if value:
+                return value
+    return None
+
+# Get configuration values
+GOOGLE_CREDENTIALS_PATH = get_config_value(
+    ['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS'],
+    ['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS']
+)
+
+OPENAI_API_KEY = get_config_value(
+    ['openai_api_llm', 'OPENAI_API_KEY', 'OPENAI_KEY'],
+    ['openai_api_llm', 'OPENAI_API_KEY', 'OPENAI_KEY']
+)
 
 # Ensure Google ADC env var is exported for client libraries using either a file path or raw JSON
 if GOOGLE_CREDENTIALS_PATH:
@@ -336,12 +382,37 @@ def main():
 
         # Google Credentials status
         with st.expander("Google Cloud Credentials"):
-            if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-                st.success("✅ Google credentials loaded from .env file")
-                st.info(f"Using: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+            # Check if credentials are loaded (from secrets or env)
+            creds_source = None
+            creds_value = None
+            
+            # Check Streamlit secrets first
+            try:
+                if hasattr(st, 'secrets'):
+                    for key in ['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS']:
+                        if key in st.secrets:
+                            creds_source = "Streamlit Secrets"
+                            creds_value = str(st.secrets[key])
+                            break
+            except Exception:
+                pass
+            
+            # Check environment variables
+            if not creds_value and os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+                creds_source = ".env file"
+                creds_value = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            
+            if creds_value:
+                st.success(f"✅ Google credentials loaded from {creds_source}")
+                # Only show partial path for security
+                if len(creds_value) > 50:
+                    st.info(f"Using: ...{creds_value[-30:]}")
+                else:
+                    st.info(f"Using: {creds_value}")
             else:
-                st.warning("⚠️ Google credentials not found in .env file")
-                st.info("💡 Add 'gemini_llm_api' or 'GOOGLE_APPLICATION_CREDENTIALS' to your .env file")
+                st.warning("⚠️ Google credentials not found")
+                st.info("💡 **For Streamlit Cloud:** Add to Secrets: `gemini_llm_api` or `GOOGLE_APPLICATION_CREDENTIALS`")
+                st.info("💡 **For local:** Add to `.env` file: `GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json`")
                 # st.markdown("---")
                 # st.write("**Manual override (optional):**")
                 # mode = st.radio("Input type", ["Path", "JSON"], horizontal=True, key="adc_mode")
@@ -391,11 +462,25 @@ def main():
     
     # Check if API keys are configured
     if not OPENAI_API_KEY:
-        st.error("⚠️ OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.")
+        error_msg = "⚠️ OpenAI API key not found.\n\n"
+        error_msg += "**For Streamlit Cloud:**\n"
+        error_msg += "1. Go to your app settings on Streamlit Cloud\n"
+        error_msg += "2. Navigate to 'Secrets' section\n"
+        error_msg += "3. Add: `openai_api_llm = \"your-api-key\"` or `OPENAI_API_KEY = \"your-api-key\"`\n\n"
+        error_msg += "**For local development:**\n"
+        error_msg += f"Add to your `.env` file: `OPENAI_API_KEY=your-api-key`\n"
+        st.error(error_msg)
         st.stop()
     
     if not (os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or st.session_state.get('google_credentials_set')):
-        st.error("⚠️ Google Cloud credentials not found. Please add 'gemini_llm_api' or 'GOOGLE_APPLICATION_CREDENTIALS' to your .env file in the same directory as app.py, or use the manual override in the sidebar.")
+        error_msg = "⚠️ Google Cloud credentials not found.\n\n"
+        error_msg += "**For Streamlit Cloud:**\n"
+        error_msg += "1. Go to your app settings on Streamlit Cloud\n"
+        error_msg += "2. Navigate to 'Secrets' section\n"
+        error_msg += "3. Add: `gemini_llm_api = \"path/to/credentials.json\"` or paste JSON directly\n\n"
+        error_msg += "**For local development:**\n"
+        error_msg += f"Add to your `.env` file: `GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json`\n"
+        st.error(error_msg)
         st.stop()
     
     # Main conversation area
