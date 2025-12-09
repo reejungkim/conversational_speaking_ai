@@ -372,8 +372,8 @@ def main():
                 #                 st.error("Invalid JSON content.")
                 #         else:
                 #             st.warning("Please provide credentials in the selected format.")
-                    except Exception as e:
-                        st.error(f"Failed to save credentials: {e}")
+                #     except Exception as e:
+                #         st.error(f"Failed to save credentials: {e}")
         
         st.markdown("---")
         
