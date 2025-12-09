@@ -12,11 +12,16 @@ import wave
 from streamlit_mic_recorder import mic_recorder
 import tempfile
 
-# Load environment variables
-load_dotenv('/Users/reejungkim/Documents/Git/working-in-progress/.env')
+# Get the directory where app.py is located
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.join(APP_DIR, '.env')
+
+# Load environment variables from .env file in the same directory as app.py
+load_dotenv(ENV_PATH)
+
 # Configuration
-GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api')
-OPENAI_API_KEY = os.getenv('openai_api_llm')
+GOOGLE_CREDENTIALS_PATH = os.getenv('gemini_llm_api') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+OPENAI_API_KEY = os.getenv('openai_api_llm') or os.getenv('OPENAI_API_KEY')
 
 # Ensure Google ADC env var is exported for client libraries using either a file path or raw JSON
 if GOOGLE_CREDENTIALS_PATH:
@@ -329,39 +334,46 @@ def main():
         )
         selected_voice = voice_options[voice_selection]
 
-        # Google Credentials setup UI
+        # Google Credentials status
         with st.expander("Google Cloud Credentials"):
-            st.write("Provide a service account JSON path or paste raw JSON.")
-            mode = st.radio("Input type", ["Path", "JSON"], horizontal=True, key="adc_mode")
-            if mode == "Path":
-                cred_path = st.text_input("Service account JSON path", value="", key="adc_path")
+            if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+                st.success("✅ Google credentials loaded from .env file")
+                st.info(f"Using: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
             else:
-                cred_json = st.text_area("Service account JSON (raw)", value="", height=150, key="adc_json")
-            if st.button("Save credentials", use_container_width=True, key="adc_save_btn"):
-                try:
-                    if mode == "Path" and cred_path:
-                        if os.path.isfile(cred_path):
-                            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = cred_path
-                            st.session_state.google_credentials_set = True
-                            st.success("Google credentials saved (path).")
+                st.warning("⚠️ Google credentials not found in .env file")
+                st.info("💡 Add 'gemini_llm_api' or 'GOOGLE_APPLICATION_CREDENTIALS' to your .env file")
+                st.markdown("---")
+                st.write("**Manual override (optional):**")
+                mode = st.radio("Input type", ["Path", "JSON"], horizontal=True, key="adc_mode")
+                if mode == "Path":
+                    cred_path = st.text_input("Service account JSON path", value="", key="adc_path")
+                else:
+                    cred_json = st.text_area("Service account JSON (raw)", value="", height=150, key="adc_json")
+                if st.button("Save credentials", use_container_width=True, key="adc_save_btn"):
+                    try:
+                        if mode == "Path" and cred_path:
+                            if os.path.isfile(cred_path):
+                                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = cred_path
+                                st.session_state.google_credentials_set = True
+                                st.success("Google credentials saved (path).")
+                            else:
+                                st.error("Path not found. Please check the file path.")
+                        elif mode == "JSON" and cred_json:
+                            stripped = cred_json.strip()
+                            if stripped.startswith('{') and stripped.endswith('}'):
+                                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
+                                tmp.write(stripped.encode('utf-8'))
+                                tmp.flush()
+                                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
+                                st.session_state.google_credentials_set = True
+                                tmp.close()
+                                st.success("Google credentials saved (JSON).")
+                            else:
+                                st.error("Invalid JSON content.")
                         else:
-                            st.error("Path not found. Please check the file path.")
-                    elif mode == "JSON" and cred_json:
-                        stripped = cred_json.strip()
-                        if stripped.startswith('{') and stripped.endswith('}'):
-                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-                            tmp.write(stripped.encode('utf-8'))
-                            tmp.flush()
-                            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
-                            st.session_state.google_credentials_set = True
-                            tmp.close()
-                            st.success("Google credentials saved (JSON).")
-                        else:
-                            st.error("Invalid JSON content.")
-                    else:
-                        st.warning("Please provide credentials in the selected format.")
-                except Exception as e:
-                    st.error(f"Failed to save credentials: {e}")
+                            st.warning("Please provide credentials in the selected format.")
+                    except Exception as e:
+                        st.error(f"Failed to save credentials: {e}")
         
         st.markdown("---")
         
@@ -383,7 +395,7 @@ def main():
         st.stop()
     
     if not (os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or st.session_state.get('google_credentials_set')):
-        st.error("⚠️ Google Cloud credentials not found. Use the 'Google Cloud Credentials' panel to set a path or JSON, or set 'gemini_llm_api'/'GOOGLE_APPLICATION_CREDENTIALS' in your .env.")
+        st.error("⚠️ Google Cloud credentials not found. Please add 'gemini_llm_api' or 'GOOGLE_APPLICATION_CREDENTIALS' to your .env file in the same directory as app.py, or use the manual override in the sidebar.")
         st.stop()
     
     # Main conversation area
