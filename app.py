@@ -11,6 +11,7 @@ import io
 import wave
 from streamlit_mic_recorder import mic_recorder
 import tempfile
+import json
 
 # Get the directory where app.py is located
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -72,20 +73,40 @@ OPENAI_API_KEY = get_config_value(
 # Ensure Google ADC env var is exported for client libraries using either a file path or raw JSON
 if GOOGLE_CREDENTIALS_PATH:
     try:
+        stripped = GOOGLE_CREDENTIALS_PATH.strip()
+        
         # If it's a valid file path, use it directly
-        if os.path.isfile(GOOGLE_CREDENTIALS_PATH):
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GOOGLE_CREDENTIALS_PATH
-        else:
-            # If it looks like JSON content, write to a temp file and point ADC to it
-            stripped = GOOGLE_CREDENTIALS_PATH.strip()
-            if stripped.startswith('{') and stripped.endswith('}'):
+        if os.path.isfile(stripped):
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = stripped
+        # If it looks like JSON content, write to a temp file and point ADC to it
+        elif stripped.startswith('{') and stripped.endswith('}'):
+            # Validate it's actually JSON
+            try:
+                json.loads(stripped)  # Validate JSON
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
                 tmp.write(stripped.encode('utf-8'))
                 tmp.flush()
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
                 tmp.close()
-    except Exception:
-        pass
+            except json.JSONDecodeError:
+                # Invalid JSON - don't set credentials
+                GOOGLE_CREDENTIALS_PATH = None
+        else:
+            # Check if it looks like an API key (starts with AIza, etc.) - this is NOT valid for Google Cloud services
+            if stripped.startswith('AIza') or len(stripped) < 100:
+                # This looks like an API key, not a service account JSON
+                # Clear it so we don't try to use it as a file path
+                GOOGLE_CREDENTIALS_PATH = None
+                if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+                    del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+            else:
+                # Unknown format - don't set credentials
+                GOOGLE_CREDENTIALS_PATH = None
+    except Exception as e:
+        # If anything goes wrong, clear credentials to avoid using invalid values
+        GOOGLE_CREDENTIALS_PATH = None
+        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+            del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
 
 # Page configuration
 st.set_page_config(
@@ -162,7 +183,25 @@ def transcribe_audio(audio_content):
         return transcript.strip() if transcript else None
     
     except Exception as e:
-        st.error(f"❌ Transcription error: {str(e)}")
+        error_str = str(e)
+        # Check for credential-related errors
+        if "was not found" in error_str or "File" in error_str and "not found" in error_str:
+            # This usually means an API key was used instead of a service account JSON file
+            st.error("❌ **Invalid Google Cloud credentials detected.**\n\n"
+                    "The error suggests you're using an **API key** instead of a **Service Account JSON file**.\n\n"
+                    "**Google Cloud Speech-to-Text requires:**\n"
+                    "- A Service Account JSON file (not an API key)\n\n"
+                    "**To fix:**\n"
+                    "1. Go to Google Cloud Console → IAM & Admin → Service Accounts\n"
+                    "2. Create or select a service account\n"
+                    "3. Create a key (JSON format) and download it\n"
+                    "4. Update your `.env` file or Streamlit Secrets with the path to this JSON file\n"
+                    "5. Make sure Speech-to-Text API is enabled for your project")
+        elif "authentication" in error_str.lower() or "credentials" in error_str.lower():
+            st.error(f"❌ **Authentication error:** {error_str}\n\n"
+                    "Please check your Google Cloud Service Account credentials.")
+        else:
+            st.error(f"❌ Transcription error: {error_str}")
         return None
 
 # GPT-4 function
@@ -403,7 +442,17 @@ def main():
                 creds_value = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
             
             if creds_value:
-                st.success(f"✅ Google credentials loaded from {creds_source}")
+                # Check if it looks like an API key instead of a file path or JSON
+                if (creds_value.startswith('AIza') or 
+                    (not os.path.isfile(creds_value) and 
+                     not creds_value.strip().startswith('{') and 
+                     len(creds_value) < 100)):
+                    st.error("⚠️ **Invalid credentials detected!**")
+                    st.warning("It looks like you're using an **API key** instead of a **Service Account JSON file**.\n\n"
+                              "Google Cloud Speech-to-Text requires a Service Account JSON file, not an API key.\n\n"
+                              "Please update your credentials with a valid Service Account JSON file path or JSON content.")
+                else:
+                    st.success(f"✅ Google credentials loaded from {creds_source}")
             else:
                 st.warning("⚠️ Google credentials not found")
                 st.info("💡 **For Streamlit Cloud:** Add to Secrets: `gemini_llm_api` or `GOOGLE_APPLICATION_CREDENTIALS`")
@@ -469,12 +518,18 @@ def main():
     
     if not (os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or st.session_state.get('google_credentials_set')):
         error_msg = "⚠️ Google Cloud credentials not found.\n\n"
+        error_msg += "**Important:** Google Cloud Speech-to-Text requires a **Service Account JSON file**, not an API key.\n\n"
         error_msg += "**For Streamlit Cloud:**\n"
         error_msg += "1. Go to your app settings on Streamlit Cloud\n"
         error_msg += "2. Navigate to 'Secrets' section\n"
-        error_msg += "3. Add: `gemini_llm_api = \"path/to/credentials.json\"` or paste JSON directly\n\n"
+        error_msg += "3. Add: `gemini_llm_api = \"path/to/service-account.json\"` or paste the full JSON content\n\n"
         error_msg += "**For local development:**\n"
-        error_msg += f"Add to your `.env` file: `GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json`\n"
+        error_msg += f"Add to your `.env` file: `GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account.json`\n\n"
+        error_msg += "**How to get Service Account JSON:**\n"
+        error_msg += "1. Go to Google Cloud Console → IAM & Admin → Service Accounts\n"
+        error_msg += "2. Create or select a service account\n"
+        error_msg += "3. Create a key (JSON format) and download it\n"
+        error_msg += "4. Enable Speech-to-Text and Text-to-Speech APIs for your project\n"
         st.error(error_msg)
         st.stop()
     
