@@ -41,20 +41,14 @@ def sanitize_json_string(s):
     s = s.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
     
     # 3. CRITICAL FIX: Handle actual newlines inside the private_key string.
-    # JSON forbids real line breaks inside strings. We must escape them to \n.
-    # This regex looks for the "private_key" field and fixes the content inside.
     try:
-        # Pattern to find the private key value even if it spans multiple lines
         pattern = r'("private_key"\s*:\s*")([^"]+)(")'
-        
         def escape_newlines(match):
             key_label = match.group(1)
             content = match.group(2)
             end_quote = match.group(3)
-            # Replace actual newlines with escaped \n
             fixed_content = content.replace('\n', '\\n').replace('\r', '')
             return f'{key_label}{fixed_content}{end_quote}'
-            
         s = re.sub(pattern, escape_newlines, s, flags=re.DOTALL)
     except Exception:
         pass
@@ -66,42 +60,32 @@ def find_google_credentials_in_secrets():
     logs = []
     
     if hasattr(st, 'secrets'):
-        # Check Root
         if "type" in st.secrets and st.secrets["type"] == "service_account":
             return dict(st.secrets), "ROOT", logs
 
-        # Scan all keys
         keys_to_check = list(st.secrets.keys())
         logs.append(f"🔎 Scanning secret keys: {keys_to_check}")
         
         for key in keys_to_check:
             value = st.secrets[key]
-            
-            # Case A: Dict
             if isinstance(value, dict) or hasattr(value, "keys"):
                 try:
                     d = dict(value)
                     if d.get("type") == "service_account":
                         return d, key, logs
                 except: pass
-            
-            # Case B: String (JSON)
             elif isinstance(value, str):
                 cleaned = sanitize_json_string(value)
                 if "service_account" in cleaned and "private_key" in cleaned:
                     logs.append(f"👀 Key '{key}' looks promising. parsing...")
                     try:
-                        # strict=False allows some control characters to slide by
                         d = json.loads(cleaned, strict=False)
                         if isinstance(d, dict) and d.get("type") == "service_account":
                             return d, key, logs
                     except json.JSONDecodeError as e:
                         logs.append(f"❌ Key '{key}' JSON error: {str(e)}")
-                        # Fallback: Try manual simple dict extraction if JSON fails
-                        # (Sometimes Streamlit secrets parses strings weirdly)
                         pass
 
-    # Check Env Var
     env_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
     if env_path and os.path.isfile(env_path):
         return env_path, "ENV_VAR", logs
@@ -118,7 +102,6 @@ def setup_credentials():
                 return True, logs, source
                 
             if isinstance(creds, dict):
-                # Ensure private key has correct newline formatting for Google Libs
                 if 'private_key' in creds:
                     creds['private_key'] = creds['private_key'].replace('\\n', '\n')
                 
@@ -136,19 +119,15 @@ def setup_credentials():
 # Run Setup
 creds_ok, debug_logs, creds_source = setup_credentials()
 
-# Find OpenAI Key (Fixed Logic)
+# Find OpenAI Key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if hasattr(st, "secrets") and not OPENAI_API_KEY:
-    # 1. Exact match for common names
     for key in ['openai_api_llm', 'OPENAI_API_KEY', 'openai_key']:
         if key in st.secrets:
             OPENAI_API_KEY = st.secrets[key]
             break
-    
-    # 2. Fuzzy search (if still missing)
     if not OPENAI_API_KEY:
         for k, v in st.secrets.items():
-            # Looks for "openai" in the key name (case insensitive)
             if "openai" in k.lower():
                 OPENAI_API_KEY = v
                 break
@@ -161,6 +140,9 @@ if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'last_user_message' not in st.session_state:
     st.session_state.last_user_message = None
+# TRACKING AUDIO STATE TO PREVENT LOOP
+if 'last_audio_bytes' not in st.session_state:
+    st.session_state.last_audio_bytes = None
 
 @st.cache_resource
 def init_speech_client():
@@ -173,7 +155,6 @@ def init_tts_client():
 def transcribe_audio(audio_content):
     try:
         client = init_speech_client()
-        # Fallback sample rate
         sample_rate = 16000
         try:
             with wave.open(io.BytesIO(audio_content), 'rb') as wav_file:
@@ -236,10 +217,8 @@ def main():
     with st.expander("🔧 Connection Debugger", expanded=not creds_ok or not OPENAI_API_KEY):
         if creds_ok: st.success(f"✅ Google Creds: {creds_source}")
         else: st.error("❌ Google Creds Missing")
-        
         if OPENAI_API_KEY: st.success("✅ OpenAI Key Found")
         else: st.error("❌ OpenAI Key Missing")
-        
         for log in debug_logs:
             if "❌" in log: st.markdown(f"**{log}**")
             else: st.text(log)
@@ -255,6 +234,7 @@ def main():
         if st.button("Reset"):
             st.session_state.messages = []
             st.session_state.conversation_history = []
+            st.session_state.last_audio_bytes = None
             st.rerun()
 
     # Chat
@@ -269,9 +249,18 @@ def main():
     with c2: text = st.text_input("Type...", key="txt")
 
     user_msg = None
+    
+    # LOGIC FIX: CHECK IF AUDIO IS NEW
     if audio and audio.get('bytes'):
-        with st.spinner("Transcribing..."):
-            user_msg = transcribe_audio(audio['bytes'])
+        if audio['bytes'] == st.session_state.last_audio_bytes:
+            # We already processed this audio, DO NOTHING
+            pass
+        else:
+            # New audio detected!
+            st.session_state.last_audio_bytes = audio['bytes']
+            with st.spinner("Transcribing..."):
+                user_msg = transcribe_audio(audio['bytes'])
+                
     elif text and text != st.session_state.last_user_message:
         user_msg = text
 
