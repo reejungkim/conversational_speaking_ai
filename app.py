@@ -12,7 +12,16 @@ import wave
 from streamlit_mic_recorder import mic_recorder
 import tempfile
 import json
+import re
 
+# --- 1. PAGE CONFIGURATION (MUST BE FIRST) ---
+st.set_page_config(
+    page_title="AI Language Tutor",
+    page_icon="🗣️",
+    layout="wide"
+)
+
+# --- 2. SETUP & CREDENTIALS ---
 # Get the directory where app.py is located
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(APP_DIR, '.env')
@@ -20,104 +29,121 @@ ENV_PATH = os.path.join(APP_DIR, '.env')
 # Load environment variables from .env file (for local development)
 load_dotenv(ENV_PATH)
 
-# --- CRITICAL: DEBUG & SETUP CREDENTIALS ---
-def setup_google_credentials():
-    """
-    Verbose setup to diagnose Streamlit Cloud secrets issues.
-    Returns: True if successful, False otherwise.
-    """
-    st.sidebar.header("🔧 System Status")
-    
-    # 1. Check if we already have the Env Var (Local Dev)
-    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-        if os.path.exists(os.environ["GOOGLE_APPLICATION_CREDENTIALS"]):
-            st.sidebar.success("✅ Credentials found in Env (Local)")
-            return True
-            
-    # 2. Check Streamlit Secrets
-    raw_secret = None
-    secret_source = "None"
-    
-    if hasattr(st, "secrets"):
-        # Check specific key 'gemini_llm_api'
-        if "gemini_llm_api" in st.secrets:
-            raw_secret = st.secrets["gemini_llm_api"]
-            secret_source = "st.secrets['gemini_llm_api']"
-        # Check 'GOOGLE_APPLICATION_CREDENTIALS'
-        elif "GOOGLE_APPLICATION_CREDENTIALS" in st.secrets:
-            raw_secret = st.secrets["GOOGLE_APPLICATION_CREDENTIALS"]
-            secret_source = "st.secrets['GOOGLE_APPLICATION_CREDENTIALS']"
+def sanitize_json_string(s):
+    """Attempt to clean up common copy-paste errors in JSON strings."""
+    if not isinstance(s, str):
+        return s
+    # Remove non-breaking spaces
+    s = s.replace('\u00a0', ' ')
+    # Replace smart quotes with standard quotes
+    s = s.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
+    return s.strip()
 
-    if not raw_secret:
-        st.sidebar.error("❌ No Google Credentials found in Secrets.")
-        return False
+def find_google_credentials_in_secrets():
+    """
+    Scans ALL Streamlit secrets to find anything that looks like a Google Service Account.
+    Returns: (found_dict, source_key_name, status_logs)
+    """
+    logs = []
+    
+    # 1. Check if the secrets file ITSELF is the JSON (Root level)
+    if hasattr(st, 'secrets'):
+        # Check if root has 'type': 'service_account'
+        if "type" in st.secrets and st.secrets["type"] == "service_account":
+            logs.append("✅ Found service account fields at root of secrets.")
+            return dict(st.secrets), "ROOT", logs
 
-    # 3. Process the Secret
-    try:
-        json_content = None
+        # 2. Iterate through every top-level key
+        keys_to_check = list(st.secrets.keys())
+        logs.append(f"🔎 Scanning secret keys: {keys_to_check}")
         
-        # If it's already a dict (TOML table)
-        if isinstance(raw_secret, dict):
-            # Convert to dict to be safe
-            json_content = dict(raw_secret)
+        for key in keys_to_check:
+            value = st.secrets[key]
             
-        # If it's a string (TOML string)
-        elif isinstance(raw_secret, str):
-            clean_str = raw_secret.strip()
-            # Clean common copy-paste artifacts
-            clean_str = clean_str.replace('\u00a0', ' ') 
-            try:
-                json_content = json.loads(clean_str)
-            except json.JSONDecodeError as e:
-                st.sidebar.error(f"❌ JSON Parse Error: {e}")
-                st.sidebar.code(clean_str[:100] + "...", language="text") # Show start of string for debug
-                return False
+            # CASE A: Value is a Dictionary (TOML Table)
+            if isinstance(value, dict) or hasattr(value, "keys"):
+                # Convert to standard dict to be safe
+                try:
+                    d = dict(value)
+                    if d.get("type") == "service_account" and d.get("private_key"):
+                        logs.append(f"✅ Found valid Service Account Dict under key: '{key}'")
+                        return d, key, logs
+                except Exception:
+                    pass
+            
+            # CASE B: Value is a String (TOML String / JSON String)
+            elif isinstance(value, str):
+                cleaned = sanitize_json_string(value)
+                # Heuristic: does it contain key phrases?
+                if "service_account" in cleaned and "private_key" in cleaned:
+                    logs.append(f"👀 Key '{key}' looks like a Service Account string. Attempting parse...")
+                    try:
+                        d = json.loads(cleaned)
+                        if isinstance(d, dict) and d.get("type") == "service_account":
+                            logs.append(f"✅ Successfully parsed JSON string under key: '{key}'")
+                            return d, key, logs
+                    except json.JSONDecodeError as e:
+                        logs.append(f"❌ Key '{key}' looks right but failed JSON parsing: {str(e)}")
+                        logs.append(f"   Snippet: {cleaned[:50]}...")
+
+    # 3. Check Environment Variables (Last Resort)
+    env_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+    if env_path:
+        logs.append(f"found GOOGLE_APPLICATION_CREDENTIALS env var: {env_path}")
+        if os.path.isfile(env_path):
+             return env_path, "ENV_VAR", logs
+        else:
+             logs.append("❌ Env var exists but file not found.")
+
+    return None, None, logs
+
+def setup_credentials():
+    """Runs the setup and returns log info for the debugger."""
+    creds, source, logs = find_google_credentials_in_secrets()
+    
+    if creds:
+        try:
+            # If we found a path (from env var), verify it
+            if isinstance(creds, str) and os.path.isfile(creds):
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds
+                return True, logs, source
                 
-        if not json_content:
-            st.sidebar.error("❌ Failed to process secret into JSON.")
-            return False
-
-        # 4. FIX PRIVATE KEY (Common Streamlit Issue)
-        # Sometimes newlines get escaped as '\\n' literal characters
-        if "private_key" in json_content:
-            key = json_content["private_key"]
-            if "\\n" in key:
-                json_content["private_key"] = key.replace("\\n", "\n")
-        
-        # 5. Create Temp File
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
-            json.dump(json_content, tmp)
-            tmp_path = tmp.name
+            # If we found a dict, write to temp file
+            if isinstance(creds, dict):
+                # Dump to JSON string
+                json_content = json.dumps(creds)
+                
+                # Create temp file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+                    f.write(json_content)
+                    f.flush()
+                    temp_path = f.name
+                
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_path
+                logs.append(f"💾 Written credentials to temp file: {temp_path}")
+                return True, logs, source
+        except Exception as e:
+            logs.append(f"❌ Error writing temp file: {str(e)}")
+            return False, logs, None
             
-        # 6. Set Environment Variable
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp_path
-        st.sidebar.success(f"✅ Loaded from {secret_source}")
-        return True
+    return False, logs, None
 
-    except Exception as e:
-        st.sidebar.error(f"❌ Unexpected Error: {e}")
-        return False
-
-# Run Setup Immediately
-credentials_ok = setup_google_credentials()
+# Run Setup (After page config)
+creds_ok, debug_logs, creds_source = setup_credentials()
 
 # Get OpenAI Key
-OPENAI_API_KEY = None
-if hasattr(st, 'secrets') and 'openai_api_llm' in st.secrets:
-    OPENAI_API_KEY = st.secrets['openai_api_llm']
-elif hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
-    OPENAI_API_KEY = st.secrets['OPENAI_API_KEY']
-else:
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if hasattr(st, "secrets") and not OPENAI_API_KEY:
+    if "OPENAI_API_KEY" in st.secrets:
+        OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+    else:
+        # Try finding openai key case-insensitively
+        for k, v in st.secrets.items():
+            if "openai" in k.lower() and "key" in k.lower():
+                OPENAI_API_KEY = v
+                break
 
-# --- END CONFIGURATION ---
-
-# Page configuration
-st.set_page_config(
-    page_title="AI Language Tutor",
-    page_icon="🗣️",
-    layout="wide"
-)
+# --- 3. APP LOGIC ---
 
 # Initialize session state
 if 'conversation_history' not in st.session_state:
@@ -130,23 +156,16 @@ if 'last_user_message' not in st.session_state:
 # Initialize clients
 @st.cache_resource
 def init_speech_client():
-    if not credentials_ok: return None
     return speech.SpeechClient()
 
 @st.cache_resource
 def init_tts_client():
-    if not credentials_ok: return None
     return texttospeech.TextToSpeechClient()
 
 # Speech-to-Text function
 def transcribe_audio(audio_content):
-    if not credentials_ok:
-        st.error("Google Cloud Credentials are missing.")
-        return None
-        
     try:
         client = init_speech_client()
-        # Try to detect WAV sample rate from bytes; fall back to 16000Hz
         detected_sample_rate = 16000
         try:
             with wave.open(io.BytesIO(audio_content), 'rb') as wav_file:
@@ -162,71 +181,42 @@ def transcribe_audio(audio_content):
             enable_automatic_punctuation=True,
             model="default"
         )
-        
         response = client.recognize(config=config, audio=audio)
-        
-        if not response.results:
-            return None
-        
-        transcript = ""
-        for result in response.results:
-            if result.alternatives:
-                transcript += result.alternatives[0].transcript + " "
-        
-        return transcript.strip() if transcript else None
-    
+        if not response.results: return None
+        transcript = "".join([result.alternatives[0].transcript + " " for result in response.results])
+        return transcript.strip()
     except Exception as e:
-        st.error(f"Transcription Error: {str(e)}")
+        st.error(f"Transcription Error: {e}")
         return None
 
 # GPT-4 function
 def get_ai_response(user_input, conversation_history, persona, topic, level):
     if not OPENAI_API_KEY:
-        st.error("OpenAI API Key is missing.")
-        return "I can't respond right now."
-
+        st.error("OpenAI API Key missing.")
+        return "Error: No API Key."
+        
+    client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
+    
     persona_prompts = {
-        "Friendly & Encouraging": f"You are a friendly and encouraging English conversation partner. Be patient, supportive, and celebrate the user's efforts. Keep responses natural and conversational (2-4 sentences).",
-        "Professional & Direct": f"You are a professional English tutor focused on accuracy. Provide clear feedback and corrections when needed. Keep responses educational but friendly. Keep responses conversational (2-4 sentences).",
-        "Casual & Fun": f"You are a casual and fun English conversation partner. Use idioms, humor, and relatable examples. Keep the conversation light and engaging. Keep responses conversational (2-4 sentences)."
+        "Friendly & Encouraging": f"You are a friendly and encouraging English conversation partner. Be patient, supportive. Keep responses natural (2-4 sentences).",
+        "Professional & Direct": f"You are a professional English tutor. Provide clear feedback. Keep responses educational (2-4 sentences).",
+        "Casual & Fun": f"You are a casual and fun English conversation partner. Use idioms/humor. Keep it light (2-4 sentences)."
     }
     
-    system_prompt = f"""
-You are an English conversation partner with the following characteristics:
-- Personality: {persona_prompts.get(persona, persona_prompts['Friendly & Encouraging'])}
-- Current topic: {topic}
-- User's level: {level}
+    system_prompt = f"Role: {persona_prompts.get(persona)}\nTopic: {topic}\nLevel: {level}\nInstructions: Reply naturally, stay on topic, don't repeat yourself."
 
-Instructions:
-1. Reply naturally to the user's message
-2. Stay on topic unless the user changes it
-3. Use vocabulary appropriate for their level
-4. Keep responses conversational and engaging
-5. Do NOT repeat your own previous messages
-6. Do NOT generate both sides of the conversation
-7. Do NOT ask multiple questions at once (max 1 question per response)
-"""
-    trimmed_history = conversation_history[-6:] if len(conversation_history) > 6 else conversation_history
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(trimmed_history)
-    messages.append({"role": "user", "content": user_input})
+    trimmed_history = conversation_history[-6:]
+    messages = [{"role": "system", "content": system_prompt}] + trimmed_history + [{"role": "user", "content": user_input}]
 
     try:
-        client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=300
-        )
+        response = client.chat.completions.create(model="gpt-4o-mini", messages=messages, temperature=0.7)
         return response.choices[0].message.content.strip()
     except Exception as e:
         st.error(f"OpenAI Error: {e}")
         return "Sorry, I encountered an error."
 
 # Text-to-Speech function
-def synthesize_speech(text, voice_name="en-US-Neural2-F"):
-    if not credentials_ok: return None
+def synthesize_speech(text, voice_name):
     try:
         client = init_tts_client()
         synthesis_input = texttospeech.SynthesisInput(text=text)
@@ -235,74 +225,75 @@ def synthesize_speech(text, voice_name="en-US-Neural2-F"):
         response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
         return response.audio_content
     except Exception as e:
-        st.error(f"TTS Error: {str(e)}")
+        st.error(f"TTS Error: {e}")
         return None
 
-# Audio player helper
 def autoplay_audio(audio_content):
     if audio_content:
         b64 = base64.b64encode(audio_content).decode()
-        audio_html = f"""<audio autoplay style="width: 100%;"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>"""
-        st.markdown(audio_html, unsafe_allow_html=True)
+        st.markdown(f'<audio autoplay style="width: 100%;"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>', unsafe_allow_html=True)
 
 # Main UI
 def main():
     st.title("🗣️ AI Language Tutor")
     
-    if not credentials_ok:
-        st.error("⚠️ **System Error: Google Cloud Credentials not loaded.**")
-        st.info("Check the 'System Status' in the sidebar for details.")
-        st.stop()
-        
-    if not OPENAI_API_KEY:
-        st.error("⚠️ **System Error: OpenAI API Key not loaded.**")
+    # --- DEBUGGER SECTION ---
+    with st.expander("🔧 Connection Debugger (Open if issues persist)", expanded=not creds_ok):
+        st.write("### Credential Status")
+        if creds_ok:
+            st.success(f"✅ Google Credentials Loaded Successfully from: **{creds_source}**")
+        else:
+            st.error("❌ Google Credentials NOT Found.")
+            
+        st.write("### Diagnostics Logs")
+        for log in debug_logs:
+            if "❌" in log:
+                st.markdown(f"**{log}**") # Bold errors
+            else:
+                st.text(log)
+                
+        st.write("### OpenAI Key Status")
+        if OPENAI_API_KEY:
+            st.success(f"✅ OpenAI Key detected (Starts with: {str(OPENAI_API_KEY)[:5]}...)")
+        else:
+            st.error("❌ OpenAI Key NOT found.")
+    # ------------------------
+    
+    # Stop if critical errors
+    if not creds_ok or not OPENAI_API_KEY:
+        st.warning("Please check the Debugger above to fix your credentials before continuing.")
         st.stop()
 
-    # Sidebar for configuration
+    # Sidebar
     with st.sidebar:
-        st.header("⚙️ Preferences")
-        level = st.selectbox("Language Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"], key="language_level")
-        persona = st.selectbox("Tutor Personality", ["Friendly & Encouraging", "Professional & Direct", "Casual & Fun"], key="tutor_persona")
-        topic = st.selectbox("Topic", ["General Conversation", "Restaurant & Ordering", "Job Interview", "Travel", "Small Talk"], key="conversation_topic")
-        voice_selection = st.selectbox("AI Voice", ["Female 1", "Female 2", "Male 1", "Male 2"], key="voice_selection")
+        st.header("⚙️ Settings")
+        level = st.selectbox("Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
+        persona = st.selectbox("Persona", ["Friendly & Encouraging", "Professional & Direct", "Casual & Fun"])
+        topic = st.selectbox("Topic", ["General Chat", "Food & Ordering", "Travel", "Job Interview"])
+        voice_options = {"Female 1": "en-US-Neural2-F", "Male 1": "en-US-Neural2-D"}
+        voice_selection = st.selectbox("Voice", list(voice_options.keys()))
         
-        voice_map = {
-            "Female 1": "en-US-Neural2-F", "Female 2": "en-US-Neural2-C",
-            "Male 1": "en-US-Neural2-D", "Male 2": "en-US-Neural2-A"
-        }
-        selected_voice = voice_map[voice_selection]
-        
-        if st.button("🔄 Reset Chat", use_container_width=True):
-            st.session_state.conversation_history = []
+        if st.button("🔄 Reset"):
             st.session_state.messages = []
-            st.session_state.last_user_message = None
+            st.session_state.conversation_history = []
             st.rerun()
 
-    # Chat UI
-    chat_container = st.container()
-    with chat_container:
-        if not st.session_state.messages:
-            st.info("👋 **Welcome!** Select your topic and start speaking/typing.")
-        
-        for message in st.session_state.messages:
-            role = message["role"]
-            content = message["content"]
-            if role == "user":
-                st.markdown(f"<div style='background-color: #e3f2fd; padding: 10px; border-radius: 10px; margin: 5px 0;'><strong>You:</strong> {content}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div style='background-color: #f5f5f5; padding: 10px; border-radius: 10px; margin: 5px 0;'><strong>Tutor:</strong> {content}</div>", unsafe_allow_html=True)
+    # Chat Area
+    for msg in st.session_state.messages:
+        role_style = "background-color: #e3f2fd;" if msg["role"] == "user" else "background-color: #f5f5f5;"
+        st.markdown(f"<div style='{role_style} padding: 10px; border-radius: 10px; margin: 5px 0;'><strong>{msg['role'].title()}:</strong> {msg['content']}</div>", unsafe_allow_html=True)
 
     # Inputs
     st.markdown("---")
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        audio_data = mic_recorder(start_prompt="🎤 Speak", stop_prompt="⏹️ Stop", key="mic")
-    with col2:
-        text_input = st.text_input("Or type here:", key="text_in")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        audio_data = mic_recorder(start_prompt="🎙️ Record", stop_prompt="⏹️ Stop", key="mic")
+    with c2:
+        text_input = st.text_input("Type message...", key="txt_in")
 
-    # Processing Logic
+    # Handling Inputs
     user_msg = None
-    if audio_data and audio_data['bytes']:
+    if audio_data and isinstance(audio_data, dict) and audio_data.get('bytes'):
         with st.spinner("Transcribing..."):
             user_msg = transcribe_audio(audio_data['bytes'])
     elif text_input and text_input != st.session_state.last_user_message:
@@ -313,16 +304,15 @@ def main():
         st.session_state.messages.append({"role": "user", "content": user_msg})
         st.session_state.conversation_history.append({"role": "user", "content": user_msg})
         
-        with st.spinner("Thinking..."):
-            ai_resp = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level)
+        with st.spinner("AI Thinking..."):
+            ai_reply = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level)
+            st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+            st.session_state.conversation_history.append({"role": "assistant", "content": ai_reply})
             
-        st.session_state.messages.append({"role": "assistant", "content": ai_resp})
-        st.session_state.conversation_history.append({"role": "assistant", "content": ai_resp})
-        
-        with st.spinner("Speaking..."):
-            audio = synthesize_speech(ai_resp, selected_voice)
+            # Auto play audio
+            audio = synthesize_speech(ai_reply, voice_options[voice_selection])
             if audio: autoplay_audio(audio)
-        
+            
         st.rerun()
 
 if __name__ == "__main__":
