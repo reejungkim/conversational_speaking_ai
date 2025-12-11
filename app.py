@@ -22,90 +22,123 @@ load_dotenv(ENV_PATH)
 
 # --- Configuration & Credential Handling ---
 
-def get_secret_or_env(keys):
+def get_google_credentials():
     """
-    Retrieve secret or env var without forcing string conversion immediately.
-    This preserves Dict objects from Streamlit secrets (TOML tables).
+    Intelligently retrieve Google Credentials from Streamlit Secrets or Environment.
+    Handles:
+    1. Specific keys (gemini_llm_api, google_credentials, etc.)
+    2. Root-level secrets (if JSON content was pasted directly)
+    3. JSON strings or Dict objects (TOML tables)
     """
-    # 1. Try Streamlit secrets
-    try:
-        if hasattr(st, 'secrets'):
-            for key in keys:
-                if key in st.secrets:
-                    return st.secrets[key]
-    except Exception:
-        pass
+    # Keys to look for (in order of preference)
+    target_keys = [
+        'gemini_llm_api', 
+        'GOOGLE_APPLICATION_CREDENTIALS', 
+        'GOOGLE_CREDENTIALS',
+        'gcp_credentials',
+        'google_key',
+        'service_account'
+    ]
     
-    # 2. Try Environment variables
-    for key in keys:
+    creds_data = None
+
+    # 1. Try Streamlit Secrets
+    if hasattr(st, 'secrets'):
+        # A. Check for specific keys (Case-insensitive)
+        secrets_map = {k.lower(): k for k in st.secrets.keys()}
+        
+        for key in target_keys:
+            if key.lower() in secrets_map:
+                creds_data = st.secrets[secrets_map[key.lower()]]
+                break
+        
+        # B. Check Root Level (If user pasted JSON content directly into secrets)
+        if not creds_data:
+            # Check if the root secrets object looks like a service account
+            if st.secrets.get("type") == "service_account" and st.secrets.get("private_key"):
+                creds_data = dict(st.secrets)
+
+    # 2. Try Environment Variables (if not found in secrets)
+    if not creds_data:
+        for key in target_keys:
+            val = os.getenv(key)
+            if val:
+                creds_data = val
+                break
+    
+    return creds_data
+
+def get_openai_key():
+    """Retrieve OpenAI API Key"""
+    target_keys = ['openai_api_llm', 'OPENAI_API_KEY', 'OPENAI_KEY']
+    
+    # Check secrets
+    if hasattr(st, 'secrets'):
+        secrets_map = {k.lower(): k for k in st.secrets.keys()}
+        for key in target_keys:
+            if key.lower() in secrets_map:
+                return str(st.secrets[secrets_map[key.lower()]]).strip()
+                
+    # Check env
+    for key in target_keys:
         val = os.getenv(key)
         if val:
-            return val
-            
+            return str(val).strip()
     return None
 
-# Fetch raw configuration
-raw_google_creds = get_secret_or_env(['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS'])
-OPENAI_API_KEY = get_secret_or_env(['openai_api_llm', 'OPENAI_API_KEY', 'OPENAI_KEY'])
+# Execution of Credential Loading
+raw_google_creds = get_google_credentials()
+OPENAI_API_KEY = get_openai_key()
 
-# Ensure OpenAI Key is a string if found
-if OPENAI_API_KEY:
-    OPENAI_API_KEY = str(OPENAI_API_KEY).strip()
-
-# Process Google Credentials
-# Goal: Ensure os.environ['GOOGLE_APPLICATION_CREDENTIALS'] points to a valid JSON file
+# Process Google Credentials into a Temp File
+# (Google Client Libraries require a file path in os.environ)
 if raw_google_creds:
     try:
-        # Case 1: Streamlit Secrets parsed it as a Dict (TOML table)
+        final_json_str = None
+        
+        # Scenario 1: It's a Dict (from TOML table or Root secrets)
         if isinstance(raw_google_creds, dict):
-            # Create a temp file with valid JSON (double quotes)
-            # json.dumps() ensures valid JSON format
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
-                json.dump(raw_google_creds, tmp)
-                tmp_path = tmp.name
+            final_json_str = json.dumps(dict(raw_google_creds))
             
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp_path
-
-        # Case 2: It is a String (File Path or JSON String)
+        # Scenario 2: It's a String (Likely your case with gemini_llm_api="""...""")
         elif isinstance(raw_google_creds, str):
             stripped = raw_google_creds.strip()
             
-            # Check if it looks like an API Key (starts with AIza...) -> Invalid for Service Account
-            if stripped.startswith('AIza') or (len(stripped) < 100 and not stripped.startswith('{') and not os.path.isfile(stripped)):
-                 # Invalid: Looks like an API key, not a service account
-                if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-                    del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-
-            # Check if it is a JSON string
-            elif stripped.startswith('{') and stripped.endswith('}'):
+            # SANITIZATION: Remove non-breaking spaces (\u00a0) which cause JSON errors
+            # This is common when copying from web/chats
+            stripped = stripped.replace('\u00a0', ' ')
+            
+            # If it's a JSON string
+            if stripped.startswith('{') and stripped.endswith('}'):
+                # Verify it parses
                 try:
-                    # Validate JSON and normalize
                     json_obj = json.loads(stripped)
-                    
-                    if json_obj.get('type') == 'service_account':
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
-                            json.dump(json_obj, tmp)
-                            tmp_path = tmp.name
-                        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp_path
-                except json.JSONDecodeError:
-                    # Invalid JSON string
-                    pass
-
-            # Check if it is a valid File Path
+                    final_json_str = json.dumps(json_obj)
+                except json.JSONDecodeError as e:
+                    print(f"JSON Parse Error: {e}")
+                    # If strictly parsing fails, try to use it anyway if it looks close enough
+                    # or fail gracefully later
+            
+            # If it's a file path (Local dev)
             elif os.path.isfile(stripped):
-                # Validate content
-                try:
-                    with open(stripped, 'r') as f:
-                        data = json.load(f)
-                        if data.get('type') == 'service_account':
-                            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = stripped
-                except Exception:
-                    pass
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = stripped
+                # Valid path found, no need to write temp file
+                final_json_str = None 
+        
+        # Write to temp file if we have JSON content
+        if final_json_str:
+            # Create a temp file that persists (delete=False) so the client lib can read it
+            # We use a known suffix .json
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
+                tmp.write(final_json_str)
+                tmp.flush()
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
 
     except Exception as e:
-        # Fallback: Clear env var if processing failed
+        # If processing fails, clear the env var so the app knows it failed
         if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
             del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+        print(f"Error processing credentials: {e}")
 
 # --- End Configuration ---
 
