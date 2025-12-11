@@ -160,7 +160,7 @@ def validate_google_credentials():
     
     # Check if file exists
     if not os.path.isfile(creds_path):
-        return False, f"Credentials file not found: {creds_path}"
+        return False, f"Credentials file not found: {}"
     
     # Validate it's a service account JSON
     try:
