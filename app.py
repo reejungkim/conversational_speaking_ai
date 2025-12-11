@@ -18,113 +18,96 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(APP_DIR, '.env')
 
 # Load environment variables from .env file (for local development)
-# This will be ignored on Streamlit Cloud where secrets are used instead
 load_dotenv(ENV_PATH)
 
-# Configuration: Check Streamlit secrets first (for Streamlit Cloud), then fall back to environment variables (for local)
-def get_config_value(secret_keys, env_keys):
+# --- Configuration & Credential Handling ---
+
+def get_secret_or_env(keys):
     """
-    Get configuration value from Streamlit secrets (Cloud) or environment variables (local)
-    
-    Args:
-        secret_keys: Single key or list of keys to look up in st.secrets
-        env_keys: List of environment variable names to try
-    
-    Returns:
-        Configuration value or None
+    Retrieve secret or env var without forcing string conversion immediately.
+    This preserves Dict objects from Streamlit secrets (TOML tables).
     """
-    # Normalize secret_keys to a list
-    if isinstance(secret_keys, str):
-        secret_keys = [secret_keys]
-    
-    # Try Streamlit secrets first (for Streamlit Cloud)
+    # 1. Try Streamlit secrets
     try:
         if hasattr(st, 'secrets'):
-            for secret_key in secret_keys:
-                if secret_key in st.secrets:
-                    value = st.secrets[secret_key]
-                    if value:
-                        value = str(value).strip()
-                        if value:
-                            return value
+            for key in keys:
+                if key in st.secrets:
+                    return st.secrets[key]
     except Exception:
         pass
     
-    # Fall back to environment variables (for local development)
-    for env_key in env_keys:
-        value = os.getenv(env_key)
-        if value:
-            value = value.strip()
-            if value:
-                return value
+    # 2. Try Environment variables
+    for key in keys:
+        val = os.getenv(key)
+        if val:
+            return val
+            
     return None
 
-# Get configuration values
-GOOGLE_CREDENTIALS_PATH = get_config_value(
-    ['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS'],
-    ['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS']
-)
+# Fetch raw configuration
+raw_google_creds = get_secret_or_env(['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS'])
+OPENAI_API_KEY = get_secret_or_env(['openai_api_llm', 'OPENAI_API_KEY', 'OPENAI_KEY'])
 
-OPENAI_API_KEY = get_config_value(
-    ['openai_api_llm', 'OPENAI_API_KEY', 'OPENAI_KEY'],
-    ['openai_api_llm', 'OPENAI_API_KEY', 'OPENAI_KEY']
-)
+# Ensure OpenAI Key is a string if found
+if OPENAI_API_KEY:
+    OPENAI_API_KEY = str(OPENAI_API_KEY).strip()
 
-# Ensure Google ADC env var is exported for client libraries using either a file path or raw JSON
-if GOOGLE_CREDENTIALS_PATH:
+# Process Google Credentials
+# Goal: Ensure os.environ['GOOGLE_APPLICATION_CREDENTIALS'] points to a valid JSON file
+if raw_google_creds:
     try:
-        stripped = GOOGLE_CREDENTIALS_PATH.strip()
-        
-        # Check if it looks like an API key (starts with AIza, etc.) - this is NOT valid for Google Cloud services
-        if stripped.startswith('AIza') or (len(stripped) < 100 and not stripped.startswith('{')):
-            # This looks like an API key, not a service account JSON
-            # Clear it so we don't try to use it as a file path
-            GOOGLE_CREDENTIALS_PATH = None
-            if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-                del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        # If it's a valid file path, validate it's a service account JSON
-        elif os.path.isfile(stripped):
-            # Validate the file contains service account credentials
-            try:
-                with open(stripped, 'r') as f:
-                    creds_data = json.load(f)
-                    if creds_data.get('type') != 'service_account':
-                        # Not a service account JSON
-                        GOOGLE_CREDENTIALS_PATH = None
-                        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-                            del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-                    else:
-                        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = stripped
-            except (json.JSONDecodeError, IOError) as e:
-                # Invalid JSON file or can't read it
-                GOOGLE_CREDENTIALS_PATH = None
+        # Case 1: Streamlit Secrets parsed it as a Dict (TOML table)
+        if isinstance(raw_google_creds, dict):
+            # Create a temp file with valid JSON (double quotes)
+            # json.dumps() ensures valid JSON format
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
+                json.dump(raw_google_creds, tmp)
+                tmp_path = tmp.name
+            
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp_path
+
+        # Case 2: It is a String (File Path or JSON String)
+        elif isinstance(raw_google_creds, str):
+            stripped = raw_google_creds.strip()
+            
+            # Check if it looks like an API Key (starts with AIza...) -> Invalid for Service Account
+            if stripped.startswith('AIza') or (len(stripped) < 100 and not stripped.startswith('{') and not os.path.isfile(stripped)):
+                 # Invalid: Looks like an API key, not a service account
                 if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
                     del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        # If it looks like JSON content, validate and write to a temp file
-        elif stripped.startswith('{') and stripped.endswith('}'):
-            # Validate it's actually JSON and contains service account credentials
-            try:
-                creds_data = json.loads(stripped)  # Validate JSON
-                if creds_data.get('type') != 'service_account':
-                    # Not a service account JSON
-                    GOOGLE_CREDENTIALS_PATH = None
-                else:
-                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-                    tmp.write(stripped.encode('utf-8'))
-                    tmp.flush()
-                    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
-                    tmp.close()
-            except json.JSONDecodeError:
-                # Invalid JSON - don't set credentials
-                GOOGLE_CREDENTIALS_PATH = None
-        else:
-            # Unknown format - don't set credentials
-            GOOGLE_CREDENTIALS_PATH = None
+
+            # Check if it is a JSON string
+            elif stripped.startswith('{') and stripped.endswith('}'):
+                try:
+                    # Validate JSON and normalize
+                    json_obj = json.loads(stripped)
+                    
+                    if json_obj.get('type') == 'service_account':
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
+                            json.dump(json_obj, tmp)
+                            tmp_path = tmp.name
+                        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp_path
+                except json.JSONDecodeError:
+                    # Invalid JSON string
+                    pass
+
+            # Check if it is a valid File Path
+            elif os.path.isfile(stripped):
+                # Validate content
+                try:
+                    with open(stripped, 'r') as f:
+                        data = json.load(f)
+                        if data.get('type') == 'service_account':
+                            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = stripped
+                except Exception:
+                    pass
+
     except Exception as e:
-        # If anything goes wrong, clear credentials to avoid using invalid values
-        GOOGLE_CREDENTIALS_PATH = None
+        # Fallback: Clear env var if processing failed
         if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
             del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+
+# --- End Configuration ---
 
 # Page configuration
 st.set_page_config(
@@ -146,7 +129,6 @@ if 'google_credentials_set' not in st.session_state:
     st.session_state.google_credentials_set = bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'))
 
 
-
 # Validate Google credentials
 def validate_google_credentials():
     """
@@ -160,7 +142,7 @@ def validate_google_credentials():
     
     # Check if file exists
     if not os.path.isfile(creds_path):
-        return False, f"Credentials file not found: "
+        return False, f"Credentials file not found: {creds_path}"
     
     # Validate it's a service account JSON
     try:
@@ -311,16 +293,6 @@ def transcribe_audio(audio_content):
 def get_ai_response(user_input, conversation_history, persona, topic, level):
     """
     Generate AI tutor response using OpenAI GPT-4o mini
-    
-    Args:
-        user_input: User's message
-        conversation_history: List of previous messages
-        persona: Tutor personality
-        topic: Conversation topic
-        level: User's language level
-    
-    Returns:
-        str: AI response
     """
     
     # Map persona to system prompt
@@ -368,7 +340,6 @@ Instructions:
             return "Sorry, I encountered an issue. Could you please try again?"
         
         # Initialize client with only the api_key parameter
-        # Ensure we're not passing any unexpected arguments
         client = OpenAI(api_key=api_key)
         
         response = client.chat.completions.create(
@@ -524,27 +495,10 @@ def main():
 
         # Google Credentials status
         with st.expander("Google Cloud Credentials"):
-            # Check if credentials are loaded (from secrets or env)
-            creds_source = None
-            creds_value = None
+            # Credentials are already processed in the header
+            creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
             
-            # Check Streamlit secrets first
-            try:
-                if hasattr(st, 'secrets'):
-                    for key in ['gemini_llm_api', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CREDENTIALS']:
-                        if key in st.secrets:
-                            creds_source = "Streamlit Secrets"
-                            creds_value = str(st.secrets[key])
-                            break
-            except Exception:
-                pass
-            
-            # Check environment variables
-            if not creds_value and os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-                creds_source = ".env file"
-                creds_value = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-            
-            if creds_value:
+            if creds_path and os.path.exists(creds_path):
                 # Validate credentials
                 is_valid, error_msg = validate_google_credentials()
                 
@@ -560,49 +514,13 @@ def main():
                               "2. Select service account → Keys → Add Key → JSON\n"
                               "3. Update your `.env` file with the file path")
                 else:
-                    # Show file path (truncated if too long)
-                    display_path = creds_value
-                    if len(display_path) > 60:
-                        display_path = "..." + display_path[-57:]
-                    st.success(f"✅ Google credentials loaded from {creds_source}")
-                    st.caption(f"Path: {display_path}")
+                    st.success(f"✅ Google credentials loaded")
+                    st.caption("Service Account JSON Active")
             else:
                 st.warning("⚠️ Google credentials not found")
                 st.info("💡 **For Streamlit Cloud:** Add to Secrets: `gemini_llm_api` or `GOOGLE_APPLICATION_CREDENTIALS`")
                 st.info("💡 **For local:** Add to `.env` file: `GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json`")
                 st.info("⚠️ **Important:** Use a Service Account JSON file, NOT an API key!")
-                # st.markdown("---")
-                # st.write("**Manual override (optional):**")
-                # mode = st.radio("Input type", ["Path", "JSON"], horizontal=True, key="adc_mode")
-                # if mode == "Path":
-                #     cred_path = st.text_input("Service account JSON path", value="", key="adc_path")
-                # else:
-                #     cred_json = st.text_area("Service account JSON (raw)", value="", height=150, key="adc_json")
-                # if st.button("Save credentials", use_container_width=True, key="adc_save_btn"):
-                #     try:
-                #         if mode == "Path" and cred_path:
-                #             if os.path.isfile(cred_path):
-                #                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = cred_path
-                #                 st.session_state.google_credentials_set = True
-                #                 st.success("Google credentials saved (path).")
-                #             else:
-                #                 st.error("Path not found. Please check the file path.")
-                #         elif mode == "JSON" and cred_json:
-                #             stripped = cred_json.strip()
-                #             if stripped.startswith('{') and stripped.endswith('}'):
-                #                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-                #                 tmp.write(stripped.encode('utf-8'))
-                #                 tmp.flush()
-                #                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = tmp.name
-                #                 st.session_state.google_credentials_set = True
-                #                 tmp.close()
-                #                 st.success("Google credentials saved (JSON).")
-                #             else:
-                #                 st.error("Invalid JSON content.")
-                #         else:
-                #             st.warning("Please provide credentials in the selected format.")
-                #     except Exception as e:
-                #         st.error(f"Failed to save credentials: {e}")
         
         st.markdown("---")
         
@@ -637,14 +555,9 @@ def main():
         error_msg += "**For Streamlit Cloud:**\n"
         error_msg += "1. Go to your app settings on Streamlit Cloud\n"
         error_msg += "2. Navigate to 'Secrets' section\n"
-        error_msg += "3. Add: `gemini_llm_api = \"path/to/service-account.json\"` or paste the full JSON content\n\n"
+        error_msg += "3. Add: `gemini_llm_api = \"...\"` (Service Account JSON)\n\n"
         error_msg += "**For local development:**\n"
-        error_msg += f"Add to your `.env` file: `GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account.json`\n\n"
-        error_msg += "**How to get Service Account JSON:**\n"
-        error_msg += "1. Go to Google Cloud Console → IAM & Admin → Service Accounts\n"
-        error_msg += "2. Create or select a service account\n"
-        error_msg += "3. Create a key (JSON format) and download it\n"
-        error_msg += "4. Enable Speech-to-Text and Text-to-Speech APIs for your project\n"
+        error_msg += f"Add to your `.env` file: `GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account.json`\n"
         st.error(error_msg)
         st.stop()
     else:
