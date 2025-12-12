@@ -282,7 +282,8 @@ def main():
             if sound: autoplay_audio(sound)
 
         if msg_source == 'text':
-            st.session_state.txt = ""
+            if "txt" in st.session_state:
+                del st.session_state["txt"]
             
         st.rerun()
 
