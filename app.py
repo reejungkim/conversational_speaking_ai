@@ -212,6 +212,10 @@ def autoplay_audio(audio_content):
 
 def main():
     st.title("🗣️ AI Language Tutor")
+
+    # Initialize a dynamic key for the text input
+    if 'text_input_key' not in st.session_state:
+        st.session_state.text_input_key = "initial_text_input"
     
     # Debugger
     with st.expander("🔧 Connection Debugger", expanded=not creds_ok or not OPENAI_API_KEY):
@@ -235,6 +239,8 @@ def main():
             st.session_state.messages = []
             st.session_state.conversation_history = []
             st.session_state.last_audio_bytes = None
+            # Also reset the text input key
+            st.session_state.text_input_key = "reset_text_input"
             st.rerun()
 
     # Chat
@@ -246,7 +252,8 @@ def main():
     st.markdown("---")
     c1, c2 = st.columns([1, 4])
     with c1: audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️", key="mic")
-    with c2: text = st.text_input("Type...", key="txt")
+    # Use the dynamic key for the text input
+    with c2: text = st.text_input("Type...", key=st.session_state.text_input_key)
 
     user_msg = None
     msg_source = None
@@ -282,8 +289,13 @@ def main():
             if sound: autoplay_audio(sound)
 
         if msg_source == 'text':
-            if "txt" in st.session_state:
-                del st.session_state["txt"]
+            # To clear the input, we change its key, forcing a new widget on rerun
+            import time
+            current_key = st.session_state.text_input_key
+            st.session_state.text_input_key = f"text_input_{time.time()}"
+            # Optional: clean up old key from state
+            if current_key in st.session_state:
+                del st.session_state[current_key]
             
         st.rerun()
 
