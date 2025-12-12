@@ -250,6 +250,15 @@ def main():
 
     user_msg = None
     
+    # Input
+    st.markdown("---")
+    c1, c2 = st.columns([1, 4])
+    with c1: audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️", key="mic")
+    with c2: text = st.text_input("Type...", key="txt")
+
+    user_msg = None
+    msg_source = None
+    
     # LOGIC FIX: CHECK IF AUDIO IS NEW
     if audio and audio.get('bytes'):
         if audio['bytes'] == st.session_state.last_audio_bytes:
@@ -260,9 +269,12 @@ def main():
             st.session_state.last_audio_bytes = audio['bytes']
             with st.spinner("Transcribing..."):
                 user_msg = transcribe_audio(audio['bytes'])
+                if user_msg:
+                    msg_source = 'audio'
                 
     elif text and text != st.session_state.last_user_message:
         user_msg = text
+        msg_source = 'text'
 
     if user_msg:
         st.session_state.last_user_message = user_msg
@@ -276,6 +288,9 @@ def main():
             
             sound = synthesize_speech(reply, voice)
             if sound: autoplay_audio(sound)
+
+        if msg_source == 'text':
+            st.session_state.txt = ""
             
         st.rerun()
 
