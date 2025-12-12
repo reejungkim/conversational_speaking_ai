@@ -249,14 +249,6 @@ def main():
     with c2: text = st.text_input("Type...", key="txt")
 
     user_msg = None
-    
-    # Input
-    st.markdown("---")
-    c1, c2 = st.columns([1, 4])
-    with c1: audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️", key="mic")
-    with c2: text = st.text_input("Type...", key="txt")
-
-    user_msg = None
     msg_source = None
     
     # LOGIC FIX: CHECK IF AUDIO IS NEW
