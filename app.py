@@ -240,7 +240,7 @@ def main():
     # Chat
     for msg in st.session_state.messages:
         bg = "#e3f2fd" if msg["role"] == "user" else "#f5f5f5"
-        st.markdown(f"<div style='background:{bg};padding:10px;border-radius:10px;margin:5px 0'><b>{msg['role'].title()}:</b> {msg['content']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='background:{bg};padding:10px;border-radius:10px;margin:5px 0; color: black'><b>{msg['role'].title()}:</b> {msg['content']}</div>", unsafe_allow_html=True)
 
     # Input
     st.markdown("---")
