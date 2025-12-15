@@ -13,6 +13,7 @@ from streamlit_mic_recorder import mic_recorder
 import tempfile
 import json
 import re
+import time
 
 # --- 1. PAGE CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(
@@ -21,7 +22,44 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. SETUP & CREDENTIALS ---
+# --- 2. LOGIN LOGIC (NEW) ---
+def check_login():
+    """Returns True if the user had logged in."""
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if (
+            st.session_state["username"] in st.secrets["login"]["username"]
+            and st.session_state["password"] == st.secrets["login"]["password"]
+        ):
+            st.session_state.password_correct = True
+            # Delete password from session state for security
+            del st.session_state["password"]
+            del st.session_state["username"]
+        else:
+            st.session_state.password_correct = False
+
+    if st.session_state.password_correct:
+        return True
+
+    # Show Login Inputs
+    st.markdown("## 🔒 Please Log In")
+    st.text_input("Username", key="username")
+    st.text_input("Password", type="password", key="password")
+    st.button("Log in", on_click=password_entered)
+    
+    if "password_correct" in st.session_state and st.session_state["username"]:
+         st.error("😕 User not known or password incorrect")
+         
+    return False
+
+# --- STOP EXECUTION IF NOT LOGGED IN ---
+if not check_login():
+    st.stop()
+
+# --- 3. SETUP & CREDENTIALS ---
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(APP_DIR, '.env')
 load_dotenv(ENV_PATH)
@@ -64,6 +102,8 @@ def find_google_credentials_in_secrets():
             return dict(st.secrets), "ROOT", logs
 
         keys_to_check = list(st.secrets.keys())
+        # Filter out the login key so we don't scan it for google creds
+        keys_to_check = [k for k in keys_to_check if k != "login"]
         logs.append(f"🔎 Scanning secret keys: {keys_to_check}")
         
         for key in keys_to_check:
@@ -128,11 +168,11 @@ if hasattr(st, "secrets") and not OPENAI_API_KEY:
             break
     if not OPENAI_API_KEY:
         for k, v in st.secrets.items():
-            if "openai" in k.lower():
+            if "openai" in k.lower() and "login" not in k: # avoid confusing with login
                 OPENAI_API_KEY = v
                 break
 
-# --- 3. APP LOGIC ---
+# --- 4. APP LOGIC ---
 
 if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
@@ -231,16 +271,22 @@ def main():
 
     # Sidebar
     with st.sidebar:
+        st.header("Settings")
         level = st.selectbox("Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
         persona = st.selectbox("Persona", ["Friendly", "Professional", "Casual"])
         topic = st.selectbox("Topic", ["General", "Food", "Travel", "Work"])
         voice = st.selectbox("Voice", ["en-US-Neural2-F", "en-US-Neural2-D"])
-        if st.button("Reset"):
+        
+        st.markdown("---")
+        if st.button("Reset Chat"):
             st.session_state.messages = []
             st.session_state.conversation_history = []
             st.session_state.last_audio_bytes = None
-            # Also reset the text input key
             st.session_state.text_input_key = "reset_text_input"
+            st.rerun()
+            
+        if st.button("Logout", type="primary"):
+            st.session_state.password_correct = False
             st.rerun()
 
     # Chat
@@ -252,19 +298,15 @@ def main():
     st.markdown("---")
     c1, c2 = st.columns([1, 4])
     with c1: audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️", key="mic")
-    # Use the dynamic key for the text input
     with c2: text = st.text_input("Type...", key=st.session_state.text_input_key)
 
     user_msg = None
     msg_source = None
     
-    # LOGIC FIX: CHECK IF AUDIO IS NEW
     if audio and audio.get('bytes'):
         if audio['bytes'] == st.session_state.last_audio_bytes:
-            # We already processed this audio, DO NOTHING
             pass
         else:
-            # New audio detected!
             st.session_state.last_audio_bytes = audio['bytes']
             with st.spinner("Transcribing..."):
                 user_msg = transcribe_audio(audio['bytes'])
@@ -289,11 +331,8 @@ def main():
             if sound: autoplay_audio(sound)
 
         if msg_source == 'text':
-            # To clear the input, we change its key, forcing a new widget on rerun
-            import time
             current_key = st.session_state.text_input_key
             st.session_state.text_input_key = f"text_input_{time.time()}"
-            # Optional: clean up old key from state
             if current_key in st.session_state:
                 del st.session_state[current_key]
             
