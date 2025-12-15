@@ -44,13 +44,18 @@ def check_login():
     if st.session_state.password_correct:
         return True
 
-    # Show Login Inputs
+    # --- 🔒 NEW FORM LOGIC STARTS HERE ---
     st.markdown("## 🔒 Please Log In")
-    st.text_input("Username", key="username")
-    st.text_input("Password", type="password", key="password")
-    st.button("Log in", on_click=password_entered)
     
-    if "password_correct" in st.session_state and st.session_state["username"]:
+    with st.form("credentials"):
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        
+        # Using form_submit_button allows "Enter" key to trigger this too
+        st.form_submit_button("Log in", on_click=password_entered)
+    # -------------------------------------
+    
+    if "password_correct" in st.session_state and st.session_state.get("username"):
          st.error("😕 User not known or password incorrect")
          
     return False
