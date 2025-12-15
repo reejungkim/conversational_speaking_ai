@@ -5,3 +5,4 @@ google-cloud-texttospeech==2.14.1
 protobuf==4.24.4
 streamlit-mic-recorder==0.0.4
 python-dotenv==1.0.1 
+supabase==1.10.0
