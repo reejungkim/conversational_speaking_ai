@@ -246,8 +246,19 @@ def synthesize_speech(text, voice_name):
 
 def autoplay_audio(audio_content):
     if audio_content:
-        # UPDATED: Use native Streamlit audio with autoplay (more reliable)
-        st.audio(audio_content, format="audio/mp3", autoplay=True)
+        # Convert bytes to base64 for HTML embedding
+        b64 = base64.b64encode(audio_content).decode()
+        # Create an HTML audio tag with autoplay
+        md = f"""
+            <audio autoplay="true">
+            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+            </audio>
+            """
+        # Render the HTML (invisible audio player that just plays)
+        st.markdown(
+            md,
+            unsafe_allow_html=True,
+        )
 
 def main():
     st.title("🗣️ AI Language Tutor")
