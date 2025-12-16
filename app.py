@@ -22,7 +22,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. LOGIN LOGIC (NEW) ---
+# --- 2. LOGIN LOGIC ---
 def check_login():
     """Returns True if the user had logged in."""
     if "password_correct" not in st.session_state:
@@ -44,7 +44,7 @@ def check_login():
     if st.session_state.password_correct:
         return True
 
-    # --- 🔒 NEW FORM LOGIC STARTS HERE ---
+    # --- 🔒 FORM LOGIC ---
     st.markdown("## 🔒 Please Log In")
     
     with st.form("credentials"):
@@ -53,7 +53,6 @@ def check_login():
         
         # Using form_submit_button allows "Enter" key to trigger this too
         st.form_submit_button("Log in", on_click=password_entered)
-    # -------------------------------------
     
     if "password_correct" in st.session_state and st.session_state.get("username"):
          st.error("😕 User not known or password incorrect")
@@ -77,13 +76,9 @@ def sanitize_json_string(s):
     if not isinstance(s, str):
         return s
     
-    # 1. Remove non-breaking spaces (common copy-paste artifact)
     s = s.replace('\u00a0', ' ')
-    
-    # 2. Fix Smart Quotes
     s = s.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
     
-    # 3. CRITICAL FIX: Handle actual newlines inside the private_key string.
     try:
         pattern = r'("private_key"\s*:\s*")([^"]+)(")'
         def escape_newlines(match):
@@ -107,7 +102,6 @@ def find_google_credentials_in_secrets():
             return dict(st.secrets), "ROOT", logs
 
         keys_to_check = list(st.secrets.keys())
-        # Filter out the login key so we don't scan it for google creds
         keys_to_check = [k for k in keys_to_check if k != "login"]
         logs.append(f"🔎 Scanning secret keys: {keys_to_check}")
         
@@ -173,7 +167,7 @@ if hasattr(st, "secrets") and not OPENAI_API_KEY:
             break
     if not OPENAI_API_KEY:
         for k, v in st.secrets.items():
-            if "openai" in k.lower() and "login" not in k: # avoid confusing with login
+            if "openai" in k.lower() and "login" not in k:
                 OPENAI_API_KEY = v
                 break
 
@@ -185,7 +179,6 @@ if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'last_user_message' not in st.session_state:
     st.session_state.last_user_message = None
-# TRACKING AUDIO STATE TO PREVENT LOOP
 if 'last_audio_bytes' not in st.session_state:
     st.session_state.last_audio_bytes = None
 
@@ -228,7 +221,8 @@ def get_ai_response(user_input, history, persona, topic, level):
         
     client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
     
-    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal:\n1. Maintain a natural, engaging conversation about the topic.\n2. Keep your responses concise (2-3 sentences max) to ensure the user speaks more than you do.\n3. Adjust your vocabulary to match the user's {level} level.\n4. **Correction Policy**: If the user makes a grammar mistake, answer them naturally first, then add a brief '💡 Correction:' note at the very bottom.\n5. Always end your turn with a relevant follow-up question."
+    # Updated Prompt
+    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal:\n1. Maintain a natural, engaging conversation about the topic.\n2. Keep your responses concise (2-3 sentences max).\n3. Adjust vocabulary to match the user's {level} level.\n4. If user makes a grammar mistake, answer naturally first, then add a brief '💡 Correction:' note at the very bottom.\n5. Always end with a follow-up question."
     msgs = [{"role": "system", "content": sys_prompt}] + history[-6:] + [{"role": "user", "content": user_input}]
 
     try:
@@ -252,8 +246,8 @@ def synthesize_speech(text, voice_name):
 
 def autoplay_audio(audio_content):
     if audio_content:
-        b64 = base64.b64encode(audio_content).decode()
-        st.markdown(f'<audio autoplay style="width: 100%;"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>', unsafe_allow_html=True)
+        # UPDATED: Use native Streamlit audio with autoplay (more reliable)
+        st.audio(audio_content, format="audio/mp3", autoplay=True)
 
 def main():
     st.title("🗣️ AI Language Tutor")
@@ -332,8 +326,10 @@ def main():
             st.session_state.messages.append({"role": "assistant", "content": reply})
             st.session_state.conversation_history.append({"role": "assistant", "content": reply})
             
+            # --- AUDIO GENERATION & PLAYBACK ---
             sound = synthesize_speech(reply, voice)
-            if sound: autoplay_audio(sound)
+            if sound: 
+                autoplay_audio(sound)
 
         if msg_source == 'text':
             current_key = st.session_state.text_input_key
