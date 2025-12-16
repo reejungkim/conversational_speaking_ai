@@ -228,12 +228,7 @@ def get_ai_response(user_input, history, persona, topic, level):
         
     client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
     
-    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal: 
-1. Maintain a natural, engaging conversation about the topic.
-2. Keep your responses concise (2-3 sentences max) to ensure the user speaks more than you do.
-3. Adjust your vocabulary to match the user's {level} level.
-4. **Correction Policy**: If the user makes a grammar mistake, answer them naturally first, then add a brief '💡 Correction:' note at the very bottom.
-5. Always end your turn with a relevant follow-up question."
+    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal:\n1. Maintain a natural, engaging conversation about the topic.\n2. Keep your responses concise (2-3 sentences max) to ensure the user speaks more than you do.\n3. Adjust your vocabulary to match the user's {level} level.\n4. **Correction Policy**: If the user makes a grammar mistake, answer them naturally first, then add a brief '💡 Correction:' note at the very bottom.\n5. Always end your turn with a relevant follow-up question."
     msgs = [{"role": "system", "content": sys_prompt}] + history[-6:] + [{"role": "user", "content": user_input}]
 
     try:
