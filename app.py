@@ -35,7 +35,6 @@ def check_login():
             and st.session_state["password"] == st.secrets["login"]["password"]
         ):
             st.session_state.password_correct = True
-            # Delete password from session state for security
             del st.session_state["password"]
             del st.session_state["username"]
         else:
@@ -44,14 +43,10 @@ def check_login():
     if st.session_state.password_correct:
         return True
 
-    # --- 🔒 FORM LOGIC ---
     st.markdown("## 🔒 Please Log In")
-    
     with st.form("credentials"):
         st.text_input("Username", key="username")
         st.text_input("Password", type="password", key="password")
-        
-        # Using form_submit_button allows "Enter" key to trigger this too
         st.form_submit_button("Log in", on_click=password_entered)
     
     if "password_correct" in st.session_state and st.session_state.get("username"):
@@ -59,7 +54,6 @@ def check_login():
          
     return False
 
-# --- STOP EXECUTION IF NOT LOGGED IN ---
 if not check_login():
     st.stop()
 
@@ -69,140 +63,90 @@ ENV_PATH = os.path.join(APP_DIR, '.env')
 load_dotenv(ENV_PATH)
 
 def sanitize_json_string(s):
-    """
-    Aggressively cleans JSON strings.
-    Specifically fixes 'Invalid control character' errors in private keys.
-    """
-    if not isinstance(s, str):
-        return s
-    
-    s = s.replace('\u00a0', ' ')
-    s = s.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
-    
+    if not isinstance(s, str): return s
+    s = s.replace('\u00a0', ' ').replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
     try:
         pattern = r'("private_key"\s*:\s*")([^"]+)(")'
         def escape_newlines(match):
-            key_label = match.group(1)
-            content = match.group(2)
-            end_quote = match.group(3)
-            fixed_content = content.replace('\n', '\\n').replace('\r', '')
-            return f'{key_label}{fixed_content}{end_quote}'
+            return f'{match.group(1)}{match.group(2).replace("\n", "\\n").replace("\r", "")}{match.group(3)}'
         s = re.sub(pattern, escape_newlines, s, flags=re.DOTALL)
-    except Exception:
-        pass
-
+    except Exception: pass
     return s.strip()
 
 def find_google_credentials_in_secrets():
-    """Scans secrets for Google Service Account credentials."""
     logs = []
-    
     if hasattr(st, 'secrets'):
         if "type" in st.secrets and st.secrets["type"] == "service_account":
             return dict(st.secrets), "ROOT", logs
-
-        keys_to_check = list(st.secrets.keys())
-        keys_to_check = [k for k in keys_to_check if k != "login"]
-        logs.append(f"🔎 Scanning secret keys: {keys_to_check}")
-        
+        keys_to_check = [k for k in list(st.secrets.keys()) if k != "login"]
         for key in keys_to_check:
             value = st.secrets[key]
             if isinstance(value, dict) or hasattr(value, "keys"):
                 try:
                     d = dict(value)
-                    if d.get("type") == "service_account":
-                        return d, key, logs
+                    if d.get("type") == "service_account": return d, key, logs
                 except: pass
             elif isinstance(value, str):
                 cleaned = sanitize_json_string(value)
                 if "service_account" in cleaned and "private_key" in cleaned:
-                    logs.append(f"👀 Key '{key}' looks promising. parsing...")
                     try:
                         d = json.loads(cleaned, strict=False)
-                        if isinstance(d, dict) and d.get("type") == "service_account":
-                            return d, key, logs
-                    except json.JSONDecodeError as e:
-                        logs.append(f"❌ Key '{key}' JSON error: {str(e)}")
-                        pass
+                        if isinstance(d, dict) and d.get("type") == "service_account": return d, key, logs
+                    except json.JSONDecodeError: pass
 
     env_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
     if env_path and os.path.isfile(env_path):
         return env_path, "ENV_VAR", logs
-
     return None, None, logs
 
 def setup_credentials():
     creds, source, logs = find_google_credentials_in_secrets()
-    
     if creds:
         try:
             if isinstance(creds, str) and os.path.isfile(creds):
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds
                 return True, logs, source
-                
             if isinstance(creds, dict):
-                if 'private_key' in creds:
-                    creds['private_key'] = creds['private_key'].replace('\\n', '\n')
-                
+                if 'private_key' in creds: creds['private_key'] = creds['private_key'].replace('\\n', '\n')
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
                     json.dump(creds, f)
                     temp_path = f.name
-                
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_path
                 return True, logs, source
-        except Exception as e:
-            logs.append(f"❌ Error writing temp file: {str(e)}")
-            
+        except Exception as e: logs.append(f"❌ Error: {str(e)}")
     return False, logs, None
 
-# Run Setup
 creds_ok, debug_logs, creds_source = setup_credentials()
 
-# Find OpenAI Key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if hasattr(st, "secrets") and not OPENAI_API_KEY:
     for key in ['openai_api_llm', 'OPENAI_API_KEY', 'openai_key']:
         if key in st.secrets:
             OPENAI_API_KEY = st.secrets[key]
             break
-    if not OPENAI_API_KEY:
-        for k, v in st.secrets.items():
-            if "openai" in k.lower() and "login" not in k:
-                OPENAI_API_KEY = v
-                break
 
 # --- 4. APP LOGIC ---
 
-if 'conversation_history' not in st.session_state:
-    st.session_state.conversation_history = []
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-if 'last_user_message' not in st.session_state:
-    st.session_state.last_user_message = None
-if 'last_audio_bytes' not in st.session_state:
-    st.session_state.last_audio_bytes = None
+if 'conversation_history' not in st.session_state: st.session_state.conversation_history = []
+if 'messages' not in st.session_state: st.session_state.messages = []
+if 'last_user_message' not in st.session_state: st.session_state.last_user_message = None
+if 'last_audio_bytes' not in st.session_state: st.session_state.last_audio_bytes = None
+# NEW: Flag to hold audio for the next run
+if 'audio_to_play' not in st.session_state: st.session_state.audio_to_play = None
 
 @st.cache_resource
-def init_speech_client():
-    return speech.SpeechClient()
+def init_speech_client(): return speech.SpeechClient()
 
 @st.cache_resource
-def init_tts_client():
-    return texttospeech.TextToSpeechClient()
+def init_tts_client(): return texttospeech.TextToSpeechClient()
 
 def transcribe_audio(audio_content):
     try:
         client = init_speech_client()
-        sample_rate = 16000
-        try:
-            with wave.open(io.BytesIO(audio_content), 'rb') as wav_file:
-                sample_rate = wav_file.getframerate()
-        except: pass
-
         audio = speech.RecognitionAudio(content=audio_content)
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=sample_rate,
+            sample_rate_hertz=16000, # mic_recorder defaults to 16k usually, but auto-detect is safer if possible
             language_code="en-US",
             enable_automatic_punctuation=True,
             model="default"
@@ -215,27 +159,20 @@ def transcribe_audio(audio_content):
         return None
 
 def get_ai_response(user_input, history, persona, topic, level):
-    if not OPENAI_API_KEY:
-        st.error("OpenAI Key Missing")
-        return "Error: No API Key."
-        
+    if not OPENAI_API_KEY: return "Error: No API Key."
     client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
-    
-    # Updated Prompt
-    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal:\n1. Maintain a natural, engaging conversation about the topic.\n2. Keep your responses concise (2-3 sentences max).\n3. Adjust vocabulary to match the user's {level} level.\n4. If user makes a grammar mistake, answer naturally first, then add a brief '💡 Correction:' note at the very bottom.\n5. Always end with a follow-up question."
+    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal:\n1. Maintain a natural conversation.\n2. Concise (2-3 sentences).\n3. Adjust vocabulary to {level}.\n4. If grammar mistake, answer first, then add '💡 Correction:' at bottom.\n5. End with a follow-up."
     msgs = [{"role": "system", "content": sys_prompt}] + history[-6:] + [{"role": "user", "content": user_input}]
-
     try:
         response = client.chat.completions.create(model="gpt-4o-mini", messages=msgs)
         return response.choices[0].message.content.strip()
-    except Exception as e:
-        st.error(f"OpenAI Error: {e}")
-        return "Sorry, I encountered an error."
+    except Exception as e: return "Sorry, I encountered an error."
 
 def synthesize_speech(text, voice_name):
     try:
         client = init_tts_client()
         s_input = texttospeech.SynthesisInput(text=text)
+        # Use the voice selected in sidebar
         voice = texttospeech.VoiceSelectionParams(language_code="en-US", name=voice_name)
         audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
         response = client.synthesize_speech(input=s_input, voice=voice, audio_config=audio_config)
@@ -245,93 +182,61 @@ def synthesize_speech(text, voice_name):
         return None
 
 def autoplay_audio(audio_content):
+    """
+    Plays audio immediately using an invisible HTML player.
+    """
     if audio_content:
-        # Convert bytes to base64 for HTML embedding
         b64 = base64.b64encode(audio_content).decode()
-        # Create an HTML audio tag with autoplay
         md = f"""
             <audio autoplay="true">
             <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
             </audio>
             """
-        # Render the HTML (invisible audio player that just plays)
-        st.markdown(
-            md,
-            unsafe_allow_html=True,
-        )
-
-def text_to_speech(text):
-    """
-    Converts text to audio bytes using Google Cloud TTS
-    """
-    # Initialize client (ensure your credentials are set in st.secrets)
-    client = texttospeech.TextToSpeechClient()
-
-    synthesis_input = texttospeech.SynthesisInput(text=text)
-
-    # Build the voice request, select the language code ("en-US") and the ssml name ("en-US-Studio-O")
-    voice = texttospeech.VoiceSelectionParams(
-        language_code="en-US", 
-        name="en-US-Studio-O" # Example: A realistic Studio voice
-    )
-
-    # Select the type of audio file you want returned
-    audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3
-    )
-
-    # Perform the text-to-speech request
-    response = client.synthesize_speech(
-        input=synthesis_input, voice=voice, audio_config=audio_config
-    )
-
-    return response.audio_content
+        st.markdown(md, unsafe_allow_html=True)
 
 def main():
     st.title("🗣️ AI Language Tutor")
 
-    # Initialize a dynamic key for the text input
     if 'text_input_key' not in st.session_state:
         st.session_state.text_input_key = "initial_text_input"
     
-    # Debugger
-    with st.expander("🔧 Connection Debugger", expanded=not creds_ok or not OPENAI_API_KEY):
-        if creds_ok: st.success(f"✅ Google Creds: {creds_source}")
-        else: st.error("❌ Google Creds Missing")
-        if OPENAI_API_KEY: st.success("✅ OpenAI Key Found")
-        else: st.error("❌ OpenAI Key Missing")
-        for log in debug_logs:
-            if "❌" in log: st.markdown(f"**{log}**")
-            else: st.text(log)
-            
-    if not creds_ok or not OPENAI_API_KEY: st.stop()
+    if not creds_ok or not OPENAI_API_KEY:
+        st.error("Credentials missing. Check logs.")
+        st.stop()
 
-    # Sidebar
+    # --- Sidebar ---
     with st.sidebar:
         st.header("Settings")
         level = st.selectbox("Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
         persona = st.selectbox("Persona", ["Friendly", "Professional", "Casual"])
         topic = st.selectbox("Topic", ["General", "Food", "Travel", "Work"])
-        voice = st.selectbox("Voice", ["en-US-Neural2-F", "en-US-Neural2-D"])
+        # Voice names from Google Cloud TTS
+        voice = st.selectbox("Voice", ["en-US-Journey-F", "en-US-Journey-D", "en-US-Studio-O", "en-US-Studio-M"])
         
         st.markdown("---")
         if st.button("Reset Chat"):
             st.session_state.messages = []
             st.session_state.conversation_history = []
             st.session_state.last_audio_bytes = None
+            st.session_state.audio_to_play = None
             st.session_state.text_input_key = "reset_text_input"
             st.rerun()
-            
         if st.button("Logout", type="primary"):
             st.session_state.password_correct = False
             st.rerun()
 
-    # Chat
+    # --- Chat History ---
     for msg in st.session_state.messages:
         bg = "#e3f2fd" if msg["role"] == "user" else "#f5f5f5"
         st.markdown(f"<div style='background:{bg};padding:10px;border-radius:10px;margin:5px 0; color: black'><b>{msg['role'].title()}:</b> {msg['content']}</div>", unsafe_allow_html=True)
 
-    # Input
+    # --- Audio Playback Logic ---
+    # We check if there is audio waiting to be played from the previous run
+    if st.session_state.audio_to_play:
+        autoplay_audio(st.session_state.audio_to_play)
+        st.session_state.audio_to_play = None  # Clear it so it plays only once
+
+    # --- Input Area ---
     st.markdown("---")
     c1, c2 = st.columns([1, 4])
     with c1: audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️", key="mic")
@@ -340,36 +245,39 @@ def main():
     user_msg = None
     msg_source = None
     
+    # 1. Handle Audio Input
     if audio and audio.get('bytes'):
-        if audio['bytes'] == st.session_state.last_audio_bytes:
-            pass
-        else:
+        if audio['bytes'] != st.session_state.last_audio_bytes:
             st.session_state.last_audio_bytes = audio['bytes']
             with st.spinner("Transcribing..."):
                 user_msg = transcribe_audio(audio['bytes'])
-                if user_msg:
-                    msg_source = 'audio'
+                msg_source = 'audio'
                 
+    # 2. Handle Text Input
     elif text and text != st.session_state.last_user_message:
         user_msg = text
         msg_source = 'text'
 
+    # 3. Process Message
     if user_msg:
         st.session_state.last_user_message = user_msg
         st.session_state.messages.append({"role": "user", "content": user_msg})
         st.session_state.conversation_history.append({"role": "user", "content": user_msg})
         
         with st.spinner("Thinking..."):
+            # Get text response
             reply = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level)
             st.session_state.messages.append({"role": "assistant", "content": reply})
             st.session_state.conversation_history.append({"role": "assistant", "content": reply})
 
-            audio_bytes = text_to_speech(reply)
-            if audio_bytes:
-                # autoplay=True ensures it plays the moment it loads
-                st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+            # Get audio response using the sidebar voice setting
+            audio_bytes = synthesize_speech(reply, voice)
             
+            # SAVE AUDIO TO STATE TO PLAY ON NEXT RELOAD
+            if audio_bytes:
+                st.session_state.audio_to_play = audio_bytes
 
+        # Reset text input if needed
         if msg_source == 'text':
             current_key = st.session_state.text_input_key
             st.session_state.text_input_key = f"text_input_{time.time()}"
