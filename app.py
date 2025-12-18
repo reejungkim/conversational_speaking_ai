@@ -363,11 +363,12 @@ def main():
             reply = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level)
             st.session_state.messages.append({"role": "assistant", "content": reply})
             st.session_state.conversation_history.append({"role": "assistant", "content": reply})
+
+            audio_bytes = text_to_speech(reply)
+            if audio_bytes:
+                # autoplay=True ensures it plays the moment it loads
+                st.audio(audio_bytes, format="audio/mp3", autoplay=True)
             
-            # --- AUDIO GENERATION & PLAYBACK ---
-            sound = synthesize_speech(reply, voice)
-            if sound: 
-                autoplay_audio(sound)
 
         if msg_source == 'text':
             current_key = st.session_state.text_input_key
