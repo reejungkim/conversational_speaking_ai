@@ -260,6 +260,33 @@ def autoplay_audio(audio_content):
             unsafe_allow_html=True,
         )
 
+def text_to_speech(text):
+    """
+    Converts text to audio bytes using Google Cloud TTS
+    """
+    # Initialize client (ensure your credentials are set in st.secrets)
+    client = texttospeech.TextToSpeechClient()
+
+    synthesis_input = texttospeech.SynthesisInput(text=text)
+
+    # Build the voice request, select the language code ("en-US") and the ssml name ("en-US-Studio-O")
+    voice = texttospeech.VoiceSelectionParams(
+        language_code="en-US", 
+        name="en-US-Studio-O" # Example: A realistic Studio voice
+    )
+
+    # Select the type of audio file you want returned
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3
+    )
+
+    # Perform the text-to-speech request
+    response = client.synthesize_speech(
+        input=synthesis_input, voice=voice, audio_config=audio_config
+    )
+
+    return response.audio_content
+
 def main():
     st.title("🗣️ AI Language Tutor")
 
