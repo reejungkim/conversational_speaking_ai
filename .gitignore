@@ -1,6 +1,7 @@
 # Environment variables
 .env
 .env.local
+.streamlit/secrets.toml 
 
 # Google Cloud credentials
 google-credentials.json
