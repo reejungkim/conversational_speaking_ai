@@ -16,12 +16,16 @@ import re
 import time
 from supabase import create_client, Client 
 
+
 # --- 1. PAGE CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(
     page_title="AI Language Tutor",
     page_icon="🗣️",
     layout="wide"
 )
+
+
+supabase = Client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 
 # --- 2. LOGIN LOGIC ---
 def check_login():
