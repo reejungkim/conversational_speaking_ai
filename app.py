@@ -14,6 +14,7 @@ import tempfile
 import json
 import re
 import time
+from supabase import create_client, Client 
 
 # --- 1. PAGE CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(
