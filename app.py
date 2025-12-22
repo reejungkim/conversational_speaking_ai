@@ -34,23 +34,26 @@ ENV_PATH = os.path.join(APP_DIR, '/.venv/.env')
 load_dotenv(ENV_PATH)
 #load_dotenv("./.venv/.env")
 
-def get_secret(key, group=None):
-    """Helper to get secrets from st.secrets or environment variables."""
-    try:
-        if group:
-            return st.secrets[group][key]
-        return st.secrets[key]
-    except (KeyError, FileNotFoundError):
-        # Fallback to .env / OS environment variables
-        env_key = f"{group.upper()}_{key.upper()}" if group else key.upper()
-        return os.getenv(env_key)
+def get_supabase_creds():
+    # Try Streamlit Secrets first (Production/Cloud)
+    if "supabase" in st.secrets:
+        url = st.secrets["supabase"].get("url")
+        key = st.secrets["supabase"].get("key")
+        if url and key:
+            return url, key
 
-# Initialize Supabase with fallback logic
-SUPABASE_URL = get_secret("url", "supabase") or os.getenv("SUPABASE_URL")
-SUPABASE_KEY = get_secret("key", "supabase") or os.getenv("SUPABASE_KEY")
+    # Try Environment Variables (Local/.env)
+    # Note: Ensure your .env keys are exactly SUPABASE_URL and SUPABASE_KEY
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
+    
+    return url, key
+
+# 2. Initialize
+SUPABASE_URL, SUPABASE_KEY = get_supabase_creds()
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("Supabase credentials not found. Check your .env or Streamlit secrets.")
+    st.error("Missing Supabase Credentials! Please check st.secrets or your .env file.")
     st.stop()
 
 supabase = Client(SUPABASE_URL, SUPABASE_KEY)
