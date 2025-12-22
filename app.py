@@ -29,7 +29,9 @@ st.set_page_config(
 # (Keep your existing st.set_page_config here)
 
 # Load environment variables from .env first
-load_dotenv("./.venv/.env")
+ENV_PATH = os.path.join(APP_DIR, '/.venv/.env') 
+load_dotenv(ENV_PATH)
+#load_dotenv("./.venv/.env")
 
 def get_secret(key, group=None):
     """Helper to get secrets from st.secrets or environment variables."""
