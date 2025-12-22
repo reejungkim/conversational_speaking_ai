@@ -24,31 +24,6 @@ st.set_page_config(
     layout="wide"
 )
 
-import streamlit as st
-import openai
-from openai import OpenAI
-from google.cloud import speech_v1p1beta1 as speech
-from google.cloud import texttospeech
-import os
-import base64
-from datetime import datetime
-# Removed: from dotenv import load_dotenv 
-import io
-import wave
-from streamlit_mic_recorder import mic_recorder
-import tempfile
-import json
-import re
-import time
-from supabase import create_client, Client 
-
-
-# --- 1. PAGE CONFIGURATION (MUST BE FIRST) ---
-st.set_page_config(
-    page_title="AI Language Tutor",
-    page_icon="🗣️",
-    layout="wide"
-)
 
 # --- 2. CREDENTIALS FETCHING ---
 def get_supabase_creds():
