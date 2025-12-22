@@ -29,6 +29,7 @@ st.set_page_config(
 # (Keep your existing st.set_page_config here)
 
 # Load environment variables from .env first
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(APP_DIR, '/.venv/.env') 
 load_dotenv(ENV_PATH)
 #load_dotenv("./.venv/.env")
@@ -90,7 +91,7 @@ if not check_login():
     st.stop()
 
 # --- 3. SETUP & CREDENTIALS ---
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+#APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # ENV_PATH = os.path.join(APP_DIR, '.env')
 # load_dotenv(ENV_PATH)
 
