@@ -73,11 +73,15 @@ def sanitize_json_string(s):
     try:
         pattern = r'("private_key"\s*:\s*")([^"]+)(")'
         def escape_newlines(match):
-            return f'{match.group(1)}{match.group(2).replace("\n", "\\n").replace("\r", "")}{match.group(3)}'
+            # Move the replacement logic to variables to avoid backslashes inside the f-string
+            prefix = match.group(1)
+            key_content = match.group(2).replace("\n", "\\n").replace("\r", "")
+            suffix = match.group(3)
+            return prefix + key_content + suffix
         s = re.sub(pattern, escape_newlines, s, flags=re.DOTALL)
     except Exception: pass
     return s.strip()
-
+    
 def find_google_credentials_in_secrets():
     logs = []
     if hasattr(st, 'secrets'):
