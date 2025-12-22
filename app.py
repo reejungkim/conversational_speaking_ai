@@ -89,8 +89,8 @@ if not check_login():
 
 # --- 3. SETUP & CREDENTIALS ---
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_PATH = os.path.join(APP_DIR, '.env')
-load_dotenv(ENV_PATH)
+# ENV_PATH = os.path.join(APP_DIR, '.env')
+# load_dotenv(ENV_PATH)
 
 
 
