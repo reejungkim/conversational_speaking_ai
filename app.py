@@ -24,39 +24,61 @@ st.set_page_config(
     layout="wide"
 )
 
+import streamlit as st
+import openai
+from openai import OpenAI
+from google.cloud import speech_v1p1beta1 as speech
+from google.cloud import texttospeech
+import os
+import base64
+from datetime import datetime
+# Removed: from dotenv import load_dotenv 
+import io
+import wave
+from streamlit_mic_recorder import mic_recorder
+import tempfile
+import json
+import re
+import time
+from supabase import create_client, Client 
 
-# --- 1. PAGE CONFIGURATION ---
-# (Keep your existing st.set_page_config here)
 
-# Load environment variables from .env first
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_PATH = os.path.join(APP_DIR, '/.venv/.env') 
-load_dotenv(ENV_PATH)
-#load_dotenv("./.venv/.env")
+# --- 1. PAGE CONFIGURATION (MUST BE FIRST) ---
+st.set_page_config(
+    page_title="AI Language Tutor",
+    page_icon="🗣️",
+    layout="wide"
+)
 
+# --- 2. CREDENTIALS FETCHING ---
 def get_supabase_creds():
-    # Try Streamlit Secrets first (Production/Cloud)
-    if "supabase" in st.secrets:
-        url = st.secrets["supabase"].get("url")
-        key = st.secrets["supabase"].get("key")
-        if url and key:
-            return url, key
-
-    # Try Environment Variables (Local/.env)
-    # Note: Ensure your .env keys are exactly SUPABASE_URL and SUPABASE_KEY
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
+    """
+    Fetches Supabase credentials from st.secrets.
+    Streamlit automatically loads local values from .streamlit/secrets.toml
+    and cloud values from the Streamlit Cloud dashboard.
+    """
+    try:
+        # Check if the 'supabase' section exists in secrets
+        if "supabase" in st.secrets:
+            url = st.secrets["supabase"].get("url")
+            key = st.secrets["supabase"].get("key")
+            if url and key:
+                return url, key
+    except Exception:
+        pass
     
-    return url, key
+    # Optional: Fallback to OS environment variables if needed
+    return os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY")
 
-# 2. Initialize
+# Initialize Supabase
 SUPABASE_URL, SUPABASE_KEY = get_supabase_creds()
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("Missing Supabase Credentials! Please check st.secrets or your .env file.")
+    st.error("Missing Supabase Credentials! Ensure they are in .streamlit/secrets.toml (local) or App Settings (cloud).")
     st.stop()
 
 supabase = Client(SUPABASE_URL, SUPABASE_KEY)
+
 
 # --- 2. LOGIN LOGIC ---
 def check_login():
