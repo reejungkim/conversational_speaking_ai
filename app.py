@@ -25,7 +25,32 @@ st.set_page_config(
 )
 
 
-supabase = Client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+# --- 1. PAGE CONFIGURATION ---
+# (Keep your existing st.set_page_config here)
+
+# Load environment variables from .env first
+load_dotenv() 
+
+def get_secret(key, group=None):
+    """Helper to get secrets from st.secrets or environment variables."""
+    try:
+        if group:
+            return st.secrets[group][key]
+        return st.secrets[key]
+    except (KeyError, FileNotFoundError):
+        # Fallback to .env / OS environment variables
+        env_key = f"{group.upper()}_{key.upper()}" if group else key.upper()
+        return os.getenv(env_key)
+
+# Initialize Supabase with fallback logic
+SUPABASE_URL = get_secret("url", "supabase") or os.getenv("SUPABASE_URL")
+SUPABASE_KEY = get_secret("key", "supabase") or os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("Supabase credentials not found. Check your .env or Streamlit secrets.")
+    st.stop()
+
+supabase = Client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- 2. LOGIN LOGIC ---
 def check_login():
@@ -67,6 +92,8 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(APP_DIR, '.env')
 load_dotenv(ENV_PATH)
 
+
+
 def sanitize_json_string(s):
     if not isinstance(s, str): return s
     s = s.replace('\u00a0', ' ').replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
@@ -81,7 +108,7 @@ def sanitize_json_string(s):
         s = re.sub(pattern, escape_newlines, s, flags=re.DOTALL)
     except Exception: pass
     return s.strip()
-    
+
 def find_google_credentials_in_secrets():
     logs = []
     if hasattr(st, 'secrets'):
