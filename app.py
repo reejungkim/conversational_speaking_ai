@@ -16,6 +16,7 @@ import re
 import time
 from supabase import create_client, Client 
 
+#st.write("Debug: Found keys in secrets:", list(st.secrets.keys()))
 
 # --- 1. PAGE CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(
@@ -92,7 +93,7 @@ def check_login():
     # Optional: Error message for failed attempts
     if "username" in st.session_state and not st.session_state.password_correct:
          st.error("😕 User not known or password incorrect")
-         
+
     return False
 
 # Execution Flow
@@ -124,27 +125,32 @@ def sanitize_json_string(s):
 def find_google_credentials_in_secrets():
     logs = []
     if hasattr(st, 'secrets'):
+        # 1. Check a dedicated [google] section (Recommended)
+        if "google" in st.secrets:
+            g_creds = st.secrets["google"]
+            if isinstance(g_creds, (dict, st.runtime.secrets.AttrDict)) and g_creds.get("type") == "service_account":
+                return dict(g_creds), "SECTION_GOOGLE", logs
+        
+        # 2. Check the ROOT level (Original logic)
         if "type" in st.secrets and st.secrets["type"] == "service_account":
             return dict(st.secrets), "ROOT", logs
-        keys_to_check = [k for k in list(st.secrets.keys()) if k != "login"]
+            
+        # 3. Check for any nested dict that looks like a service account
+        keys_to_check = [k for k in list(st.secrets.keys()) if k not in ["login", "supabase", "google"]]
         for key in keys_to_check:
             value = st.secrets[key]
-            if isinstance(value, dict) or hasattr(value, "keys"):
+            if isinstance(value, (dict, st.runtime.secrets.AttrDict)):
                 try:
                     d = dict(value)
-                    if d.get("type") == "service_account": return d, key, logs
-                except: pass
-            elif isinstance(value, str):
-                cleaned = sanitize_json_string(value)
-                if "service_account" in cleaned and "private_key" in cleaned:
-                    try:
-                        d = json.loads(cleaned, strict=False)
-                        if isinstance(d, dict) and d.get("type") == "service_account": return d, key, logs
-                    except json.JSONDecodeError: pass
+                    if d.get("type") == "service_account": 
+                        return d, key, logs
+                except Exception: pass
 
+    # 4. Fallback to Environment Variable
     env_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
     if env_path and os.path.isfile(env_path):
         return env_path, "ENV_VAR", logs
+        
     return None, None, logs
 
 def setup_credentials():
@@ -250,6 +256,9 @@ def main():
     
     if not creds_ok or not OPENAI_API_KEY:
         st.error("Credentials missing. Check logs.")
+                # Temporary Debugging Lines
+        st.write(f"DEBUG: creds_ok status: {creds_ok}")
+        st.write(f"DEBUG: OpenAI Key found: {bool(OPENAI_API_KEY)}")
         st.stop()
 
     # --- Sidebar ---
