@@ -57,38 +57,47 @@ supabase = Client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- 2. LOGIN LOGIC ---
 def check_login():
-    """Returns True if the user had logged in."""
+    """Returns True if the user has logged in."""
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
 
+    if st.session_state.password_correct:
+        return True
+
     def password_entered():
         """Checks whether a password entered by the user is correct."""
+        if "login" not in st.secrets:
+            st.error("Critical Error: 'login' section missing from secrets.toml")
+            return
+
         if (
             st.session_state["username"] in st.secrets["login"]["username"]
             and st.session_state["password"] == st.secrets["login"]["password"]
         ):
             st.session_state.password_correct = True
+            # Clean up sensitive info from state
             del st.session_state["password"]
             del st.session_state["username"]
+            # REMOVED st.rerun() - It's not needed here
         else:
             st.session_state.password_correct = False
 
-    if st.session_state.password_correct:
-        return True
-
+    # Display Login Form
     st.markdown("## 🔒 Please Log In")
     with st.form("credentials"):
         st.text_input("Username", key="username")
         st.text_input("Password", type="password", key="password")
         st.form_submit_button("Log in", on_click=password_entered)
     
-    if "password_correct" in st.session_state and st.session_state.get("username"):
+    # Optional: Error message for failed attempts
+    if "username" in st.session_state and not st.session_state.password_correct:
          st.error("😕 User not known or password incorrect")
          
     return False
 
+# Execution Flow
 if not check_login():
-    st.stop()
+    st.stop()  # Stop here if not logged in
 
 # --- 3. SETUP & CREDENTIALS ---
 #APP_DIR = os.path.dirname(os.path.abspath(__file__))
