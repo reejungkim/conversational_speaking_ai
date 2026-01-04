@@ -215,7 +215,25 @@ def transcribe_audio(audio_content):
 def get_ai_response(user_input, history, persona, topic, level):
     if not OPENAI_API_KEY: return "Error: No API Key."
     client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
-    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal:\n1. Maintain a natural conversation.\n2. Concise (2-3 sentences).\n3. Adjust vocabulary to {level}.\n4. If grammar mistake, answer first, then add '💡 Correction:' at bottom.\n5. End with a follow-up."
+    sys_prompt = f"Role: English Tutor ({persona})\nTopic: {topic}\nLevel: {level}\nYour Goal:\n1. Maintain a natural conversation.\n2. Concise (2-3 sentences).\n3. Adjust vocabulary to {level}.\n"+'''
+        You are an experienced English language tutor specializing in conversational fluency and grammar correction tailored to varying proficiency levels. I seek your expertise to design a dynamic tutoring prompt that facilitates natural, concise dialogues while adapting vocabulary complexity appropriately.
+
+        Please ensure the prompt includes:
+
+        - Role Specification: Define the tutor’s persona clearly to align responses with the learner’s needs.
+
+        - Topic and Level Customization: Integrate subject matter and proficiency level to tailor vocabulary and complexity.
+
+        - Conversational Goals: Emphasize maintaining natural flow, limiting responses to 2-3 sentences for conciseness.
+
+        - Error Correction Protocol: Upon detecting grammar mistakes, provide the corrected response first, followed by a distinct "💡 Correction:" note explaining the error.
+
+        - Engagement Strategy: Conclude each response with a relevant follow-up question to encourage learner interaction.
+
+        - Message Structure: Incorporate system-level instructions combined with recent conversational history and the current user input to maintain context.
+
+        Leverage your advanced understanding of language pedagogy and AI prompt engineering to refine this framework, ensuring it maximizes learner engagement and language acquisition efficacy.
+        '''
     msgs = [{"role": "system", "content": sys_prompt}] + history[-6:] + [{"role": "user", "content": user_input}]
     try:
         response = client.chat.completions.create(model="gpt-4o-mini", messages=msgs)
