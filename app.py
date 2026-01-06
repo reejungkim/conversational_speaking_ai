@@ -122,78 +122,36 @@ def sanitize_json_string(s):
     except Exception: pass
     return s.strip()
 
-
-def get_google_credentials():
-    """
-    Retrieves Google Cloud Credentials with support for both
-    Streamlit Cloud (st.secrets) and Local execution (Env Var/File).
-    """
-    creds = None
-    
-    # 1. Try Streamlit Secrets (Priority: Cloud)
-    # Check if the specific section exists in the secrets dictionary
-    if "gcp_service_account" in st.secrets:
-        try:
-            # Create a dictionary from the secrets object
-            # This handles the AttrDict to Dict conversion
-            service_account_info = dict(st.secrets["gcp_service_account"])
+def find_google_credentials_in_secrets():
+    logs = []
+    if hasattr(st, 'secrets'):
+        # 1. Check a dedicated [google] section (Recommended)
+        if "google" in st.secrets:
+            g_creds = st.secrets["google"]
+            if isinstance(g_creds, (dict, st.runtime.secrets.AttrDict)) and g_creds.get("type") == "service_account":
+                return dict(g_creds), "SECTION_GOOGLE", logs
+        
+        # 2. Check the ROOT level (Original logic)
+        if "type" in st.secrets and st.secrets["type"] == "service_account":
+            return dict(st.secrets), "ROOT", logs
             
-            # CRITICAL FIX: Handle Private Key Newlines
-            # If the key came from TOML, the \n might be escaped. 
-            # We explicitly replace literal \n with actual newline characters.
-            if "private_key" in service_account_info:
-                private_key = service_account_info["private_key"]
-                if "\\n" in private_key:
-                    service_account_info["private_key"] = private_key.replace("\\n", "\n")
-            
-            # Create Credentials Object
-            creds = service_account.Credentials.from_service_account_info(
-                service_account_info,
-                scopes=["https://www.googleapis.com/auth/spreadsheets", 
-                        "https://www.googleapis.com/auth/drive"]
-            )
-            print("DEBUG: Loaded credentials from st.secrets")
-            return creds
-        except Exception as e:
-            print(f"DEBUG: Error loading from st.secrets: {e}")
+        # 3. Check for any nested dict that looks like a service account
+        keys_to_check = [k for k in list(st.secrets.keys()) if k not in ["login", "supabase", "google"]]
+        for key in keys_to_check:
+            value = st.secrets[key]
+            if isinstance(value, (dict, st.runtime.secrets.AttrDict)):
+                try:
+                    d = dict(value)
+                    if d.get("type") == "service_account": 
+                        return d, key, logs
+                except Exception: pass
 
-    # 2. Try Local Environment Variable (Priority: Local Development)
-    # This allows developers to use a.json file locally without relying on secrets.toml
-    env_creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if env_creds_path and os.path.exists(env_creds_path):
-        try:
-            creds = service_account.Credentials.from_service_account_file(
-                env_creds_path,
-                scopes=["https://www.googleapis.com/auth/spreadsheets", 
-                        "https://www.googleapis.com/auth/drive"]
-            )
-            print(f"DEBUG: Loaded credentials from file: {env_creds_path}")
-            return creds
-        except Exception as e:
-            print(f"DEBUG: Error loading from file: {e}")
-
-    # 3. Final Fallback: Implicit ADC (Priority: Local System-Level Auth)
-    # This catches cases where the user ran `gcloud auth application-default login`
-    try:
-        import google.auth
-        creds, project = google.auth.default()
-        print("DEBUG: Loaded credentials from Application Default Credentials")
-        return creds
-    except Exception as e:
-        print(f"DEBUG: ADC failed: {e}")
-
-    return None
-
-# Main Execution Flow
-creds = get_google_credentials()
-
-if creds:
-    print("DEBUG: creds_ok status: True")
-    # Initialize your client here, e.g.,
-    # client = gspread.authorize(creds)
-else:
-    print("DEBUG: creds_ok status: False")
-    st.error("Credentials missing. Please check logs.")
+    # 4. Fallback to Environment Variable
+    env_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+    if env_path and os.path.isfile(env_path):
+        return env_path, "ENV_VAR", logs
+        
+    return None, None, logs
 
 def setup_credentials():
     creds, source, logs = find_google_credentials_in_secrets()
