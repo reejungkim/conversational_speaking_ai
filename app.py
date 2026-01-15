@@ -170,7 +170,7 @@ def setup_credentials():
         except Exception as e: logs.append(f"❌ Error: {str(e)}")
     return False, logs, None
 
-creds_ok, debug_logs, creds_source = setup_credentials()
+creds_ok, debug_logs, creds_source = setup_credentials() 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if hasattr(st, "secrets") and not OPENAI_API_KEY:
@@ -194,14 +194,14 @@ def init_speech_client(): return speech.SpeechClient()
 @st.cache_resource
 def init_tts_client(): return texttospeech.TextToSpeechClient()
 
-def transcribe_audio(audio_content):
+def transcribe_audio(audio_content, language_code="en-US"):
     try:
         client = init_speech_client()
         audio = speech.RecognitionAudio(content=audio_content)
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=16000, # mic_recorder defaults to 16k usually, but auto-detect is safer if possible
-            language_code="en-US",
+            language_code=language_code,
             enable_automatic_punctuation=True,
             model="default"
         )
@@ -212,10 +212,11 @@ def transcribe_audio(audio_content):
         st.error(f"Transcription Error: {e}")
         return None
 
-def get_ai_response(user_input, history, persona, topic, level):
+def get_ai_response(user_input, history, persona, topic, level, language="English"):
     if not OPENAI_API_KEY: return "Error: No API Key."
     client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
-    sys_prompt = f"""Role: English Tutor ({persona})
+    language_name = "French" if language == "French" else "English"
+    sys_prompt = f"""Role: {language_name} Tutor ({persona})
 Topic: {topic}
 Level: {level}
 Your Goal:
@@ -223,7 +224,7 @@ Your Goal:
 2. Concise (2-3 sentences).
 3. Adjust vocabulary to {level}.
 
-You are an experienced English language tutor specializing in conversational fluency and grammar correction tailored to varying proficiency levels. I seek your expertise to design a dynamic tutoring prompt that facilitates natural, concise dialogues while adapting vocabulary complexity appropriately.
+You are an experienced {language_name} language tutor specializing in conversational fluency and grammar correction tailored to varying proficiency levels. I seek your expertise to design a dynamic tutoring prompt that facilitates natural, concise dialogues while adapting vocabulary complexity appropriately.
 
 Please ensure the prompt includes:
 
@@ -246,12 +247,12 @@ Leverage your advanced understanding of language pedagogy and AI prompt engineer
         return response.choices[0].message.content.strip()
     except Exception as e: return "Sorry, I encountered an error."
 
-def synthesize_speech(text, voice_name):
+def synthesize_speech(text, voice_name, language_code="en-US"):
     try:
         client = init_tts_client()
         s_input = texttospeech.SynthesisInput(text=text)
         # Use the voice selected in sidebar
-        voice = texttospeech.VoiceSelectionParams(language_code="en-US", name=voice_name)
+        voice = texttospeech.VoiceSelectionParams(language_code=language_code, name=voice_name)
         audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
         response = client.synthesize_speech(input=s_input, voice=voice, audio_config=audio_config)
         return response.audio_content
@@ -288,11 +289,15 @@ def main():
     # --- Sidebar ---
     with st.sidebar:
         st.header("Settings")
+        language = st.selectbox("Language", ["English", "French"])
         level = st.selectbox("Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
         persona = st.selectbox("Persona", ["Friendly", "Professional", "Casual"])
         topic = st.selectbox("Topic", ["General", "Food", "Travel", "Work"])
-        # Voice names from Google Cloud TTS
-        voice = st.selectbox("Voice", ["en-US-Journey-F", "en-US-Journey-D", "en-US-Studio-O", "en-US-Studio-M"])
+        # Voice names from Google Cloud TTS - update based on language selection
+        if language == "English":
+            voice = st.selectbox("Voice", ["en-US-Journey-F", "en-US-Journey-D", "en-US-Studio-O", "en-US-Studio-M"])
+        else:  # French
+            voice = st.selectbox("Voice", ["fr-FR-Neural2-A", "fr-FR-Neural2-B", "fr-FR-Neural2-C", "fr-FR-Neural2-D", "fr-FR-Standard-A", "fr-FR-Standard-B", "fr-FR-Standard-C", "fr-FR-Standard-D", "fr-FR-Standard-E"])
         
         st.markdown("---")
         if st.button("Reset Chat"):
@@ -331,7 +336,8 @@ def main():
         if audio['bytes'] != st.session_state.last_audio_bytes:
             st.session_state.last_audio_bytes = audio['bytes']
             with st.spinner("Transcribing..."):
-                user_msg = transcribe_audio(audio['bytes'])
+                language_code = "fr-FR" if language == "French" else "en-US"
+                user_msg = transcribe_audio(audio['bytes'], language_code)
                 msg_source = 'audio'
                 
     # 2. Handle Text Input
@@ -347,12 +353,13 @@ def main():
         
         with st.spinner("Thinking..."):
             # Get text response
-            reply = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level)
+            reply = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level, language)
             st.session_state.messages.append({"role": "assistant", "content": reply})
             st.session_state.conversation_history.append({"role": "assistant", "content": reply})
 
             # Get audio response using the sidebar voice setting
-            audio_bytes = synthesize_speech(reply, voice)
+            language_code = "fr-FR" if language == "French" else "en-US"
+            audio_bytes = synthesize_speech(reply, voice, language_code)
             
             # SAVE AUDIO TO STATE TO PLAY ON NEXT RELOAD
             if audio_bytes:
