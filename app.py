@@ -161,13 +161,27 @@ def setup_credentials():
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds
                 return True, logs, source
             if isinstance(creds, dict):
-                if 'private_key' in creds: creds['private_key'] = creds['private_key'].replace('\\n', '\n')
+                # More robust private key handling for Streamlit Cloud
+                if 'private_key' in creds:
+                    pk = creds['private_key']
+                    # Replace literal \n with actual newlines
+                    pk = pk.replace('\\n', '\n')
+                    # Also handle if it's already correct
+                    if '\\n' not in pk and '\n' not in pk:
+                        # If no newlines at all, might need to add them
+                        pk = pk.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+                        pk = pk.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----')
+                    creds['private_key'] = pk
+                
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
                     json.dump(creds, f)
                     temp_path = f.name
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_path
                 return True, logs, source
-        except Exception as e: logs.append(f"❌ Error: {str(e)}")
+        except Exception as e: 
+            logs.append(f"❌ Error: {str(e)}")
+            import traceback
+            logs.append(f"Traceback: {traceback.format_exc()}")
     return False, logs, None
 
 creds_ok, debug_logs, creds_source = setup_credentials() 
@@ -197,7 +211,7 @@ def init_tts_client(): return texttospeech.TextToSpeechClient()
 def transcribe_audio(audio_content, language_code="en-US"):
     try:
         # Debug: Log audio size
-        st.write(f"Debug: Audio size: {len(audio_content)} bytes")
+        # st.write(f"Debug: Audio size: {len(audio_content)} bytes")
         
         client = init_speech_client()
         audio = speech.RecognitionAudio(content=audio_content)
@@ -209,16 +223,16 @@ def transcribe_audio(audio_content, language_code="en-US"):
             model="default"
         )
         
-        st.write("Debug: Sending to Google Speech API...")
-        response = client.recognize(config=config, audio=audio)
-        st.write(f"Debug: Response received. Results count: {len(response.results) if response.results else 0}")
+        # st.write("Debug: Sending to Google Speech API...")
+        # response = client.recognize(config=config, audio=audio)
+        # st.write(f"Debug: Response received. Results count: {len(response.results) if response.results else 0}")
         
         if not response.results:
             st.write("Debug: No results from Google Speech API")
             return None
             
         transcript = " ".join([result.alternatives[0].transcript for result in response.results]).strip()
-        st.write(f"Debug: Transcript: '{transcript}'")
+        # st.write(f"Debug: Transcript: '{transcript}'")
         return transcript
     except Exception as e:
         st.error(f"Transcription Error: {e}")
