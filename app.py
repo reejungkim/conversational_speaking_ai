@@ -56,32 +56,56 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase = Client(SUPABASE_URL, SUPABASE_KEY)
 
 
+from user_auth import authenticate_user
+
 # --- 2. LOGIN LOGIC ---
 def check_login():
     """Returns True if the user has logged in."""
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
+        st.session_state.current_user = None
 
     if st.session_state.password_correct:
         return True
 
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        if "login" not in st.secrets:
-            st.error("Critical Error: 'login' section missing from secrets.toml")
-            return
-
-        if (
-            st.session_state["username"] in st.secrets["login"]["username"]
-            and st.session_state["password"] == st.secrets["login"]["password"]
-        ):
+        username = st.session_state.get("username", "")
+        password = st.session_state.get("password", "")
+        
+        # Try Supabase authentication first
+        user = authenticate_user(supabase, username, password)
+        
+        if user:
             st.session_state.password_correct = True
+            st.session_state.current_user = user
             # Clean up sensitive info from state
-            del st.session_state["password"]
-            del st.session_state["username"]
-            # REMOVED st.rerun() - It's not needed here
+            if "password" in st.session_state:
+                del st.session_state["password"]
+            if "username" in st.session_state:
+                del st.session_state["username"]
         else:
-            st.session_state.password_correct = False
+            # Fallback to secrets.toml for backward compatibility
+            if "login" in st.secrets:
+                if (
+                    username in st.secrets["login"]["username"]
+                    and password == st.secrets["login"]["password"]
+                ):
+                    st.session_state.password_correct = True
+                    st.session_state.current_user = {
+                        'username': username,
+                        'full_name': username,
+                        'is_admin': username == 'admin'
+                    }
+                    # Clean up sensitive info
+                    if "password" in st.session_state:
+                        del st.session_state["password"]
+                    if "username" in st.session_state:
+                        del st.session_state["username"]
+                else:
+                    st.session_state.password_correct = False
+            else:
+                st.session_state.password_correct = False
 
     # Display Login Form
     st.markdown("## 🔒 Please Log In")
@@ -93,6 +117,9 @@ def check_login():
     # Optional: Error message for failed attempts
     if "username" in st.session_state and not st.session_state.password_correct:
          st.error("😕 User not known or password incorrect")
+    
+    # Info message about admin panel
+    st.info("👉 Admins: Access the user management panel by running `streamlit run admin_panel.py`")
 
     return False
 
@@ -210,29 +237,22 @@ def init_tts_client(): return texttospeech.TextToSpeechClient()
 
 def transcribe_audio(audio_content, language_code="en-US"):
     try:
-        # Debug: Log audio size
-        # st.write(f"Debug: Audio size: {len(audio_content)} bytes")
-        
         client = init_speech_client()
         audio = speech.RecognitionAudio(content=audio_content)
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=48000, # Updated to match mic_recorder's actual sample rate
+            sample_rate_hertz=48000,
             language_code=language_code,
             enable_automatic_punctuation=True,
             model="default"
         )
         
-        # st.write("Debug: Sending to Google Speech API...")
-        # response = client.recognize(config=config, audio=audio)
-        # st.write(f"Debug: Response received. Results count: {len(response.results) if response.results else 0}")
+        response = client.recognize(config=config, audio=audio)
         
         if not response.results:
-            st.write("Debug: No results from Google Speech API")
             return None
             
         transcript = " ".join([result.alternatives[0].transcript for result in response.results]).strip()
-        # st.write(f"Debug: Transcript: '{transcript}'")
         return transcript
     except Exception as e:
         st.error(f"Transcription Error: {e}")
@@ -317,6 +337,15 @@ def main():
     # --- Sidebar ---
     with st.sidebar:
         st.header("Settings")
+        
+        # Welcome message
+        if st.session_state.get('current_user'):
+            user = st.session_state.current_user
+            st.markdown(f"**Welcome, {user.get('full_name') or user.get('username')}!**")
+            if user.get('is_admin'):
+                st.caption("🔑 Admin")
+            st.markdown("---")
+        
         language = st.selectbox("Language", ["English", "French"])
         level = st.selectbox("Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
         persona = st.selectbox("Persona", ["Friendly", "Professional", "Casual"])
