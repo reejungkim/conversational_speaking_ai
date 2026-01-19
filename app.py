@@ -196,20 +196,34 @@ def init_tts_client(): return texttospeech.TextToSpeechClient()
 
 def transcribe_audio(audio_content, language_code="en-US"):
     try:
+        # Debug: Log audio size
+        st.write(f"Debug: Audio size: {len(audio_content)} bytes")
+        
         client = init_speech_client()
         audio = speech.RecognitionAudio(content=audio_content)
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000, # mic_recorder defaults to 16k usually, but auto-detect is safer if possible
+            sample_rate_hertz=48000, # Updated to match mic_recorder's actual sample rate
             language_code=language_code,
             enable_automatic_punctuation=True,
             model="default"
         )
+        
+        st.write("Debug: Sending to Google Speech API...")
         response = client.recognize(config=config, audio=audio)
-        if not response.results: return None
-        return " ".join([result.alternatives[0].transcript for result in response.results]).strip()
+        st.write(f"Debug: Response received. Results count: {len(response.results) if response.results else 0}")
+        
+        if not response.results:
+            st.write("Debug: No results from Google Speech API")
+            return None
+            
+        transcript = " ".join([result.alternatives[0].transcript for result in response.results]).strip()
+        st.write(f"Debug: Transcript: '{transcript}'")
+        return transcript
     except Exception as e:
         st.error(f"Transcription Error: {e}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 def get_ai_response(user_input, history, persona, topic, level, language="English"):
@@ -339,6 +353,12 @@ def main():
                 language_code = "fr-FR" if language == "French" else "en-US"
                 user_msg = transcribe_audio(audio['bytes'], language_code)
                 msg_source = 'audio'
+                # Debug: Show what was transcribed
+                if user_msg:
+                    st.info(f"🎤 Transcribed: {user_msg}")
+                else:
+                    st.warning("⚠️ No speech detected. Please try again.")
+                    user_msg = None
                 
     # 2. Handle Text Input
     elif text and text != st.session_state.last_user_message:
