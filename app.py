@@ -14,7 +14,11 @@ import tempfile
 import json
 import re
 import time
-from supabase import create_client, Client 
+from supabase import create_client, Client
+
+# Suppress Google Cloud gRPC warnings
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GLOG_minloglevel'] = '2'
 
 #st.write("Debug: Found keys in secrets:", list(st.secrets.keys()))
 
@@ -226,8 +230,8 @@ if 'conversation_history' not in st.session_state: st.session_state.conversation
 if 'messages' not in st.session_state: st.session_state.messages = []
 if 'last_user_message' not in st.session_state: st.session_state.last_user_message = None
 if 'last_audio_bytes' not in st.session_state: st.session_state.last_audio_bytes = None
-# NEW: Flag to hold audio for the next run
 if 'audio_to_play' not in st.session_state: st.session_state.audio_to_play = None
+if 'play_correction_audio' not in st.session_state: st.session_state.play_correction_audio = None
 
 @st.cache_resource
 def init_speech_client(): return speech.SpeechClient()
@@ -261,39 +265,83 @@ def transcribe_audio(audio_content, language_code="en-US"):
         return None
 
 def get_ai_response(user_input, history, persona, topic, level, language="English"):
-    if not OPENAI_API_KEY: return "Error: No API Key."
+    if not OPENAI_API_KEY: return {"conversation": "Error: No API Key.", "correction": None}
     client = OpenAI(api_key=str(OPENAI_API_KEY).strip())
     language_name = "French" if language == "French" else "English"
-    sys_prompt = f"""Role: {language_name} Tutor ({persona})
+    
+    sys_prompt = f"""You are an experienced {language_name} language tutor with a {persona.lower()} teaching style.
+
+Your role:
+- Help students practice {language_name} conversation on the topic of {topic}
+- Adapt your language to {level} proficiency
+- Keep responses natural and conversational (2-3 sentences)
+- Provide grammar corrections when needed WITHOUT interrupting the conversation flow
+
+CRITICAL: You MUST use this exact format for EVERY response:
+
+<conversation>
+[Your natural, conversational response here - NO corrections, NO grammar mentions, ONLY conversation]
+</conversation>
+
+<correction>
+[ONLY if there was a grammar/vocabulary/spelling error, write it here. Otherwise leave empty]
+[Format: "You said: '[incorrect phrase]' → Better: '[corrected phrase]' - [brief explanation]"]
+</correction>
+
+IMPORTANT RULES:
+1. The <conversation> section should NEVER mention errors or corrections
+2. The <conversation> section should flow naturally as if nothing was wrong
+3. Keep the conversation going - ask follow-up questions, show interest
+4. The <correction> section is COMPLETELY SEPARATE - only grammar fixes go there
+5. If there are no errors, leave <correction> empty or write just a dash: -
+6. Do NOT mix conversation and correction - they are separate sections
+
+Example 1 (with error):
+User: "I goed to store yesterday"
+<conversation>
+Oh nice! What did you buy at the store? I love shopping too.
+</conversation>
+<correction>
+You said: 'I goed to store' → Better: 'I went to the store' - "Go" is irregular (went, not goed), and we need "the" before "store".
+</correction>
+
+Example 2 (no error):
+User: "I went to the store yesterday"
+<conversation>
+Oh nice! What did you buy at the store? I love shopping too.
+</conversation>
+<correction>
+-
+</correction>
+
 Topic: {topic}
 Level: {level}
-Your Goal:
-1. Maintain a natural conversation.
-2. Concise (2-3 sentences).
-3. Adjust vocabulary to {level}.
-
-You are an experienced {language_name} language tutor specializing in conversational fluency and grammar correction tailored to varying proficiency levels. I seek your expertise to design a dynamic tutoring prompt that facilitates natural, concise dialogues while adapting vocabulary complexity appropriately.
-
-Please ensure the prompt includes:
-
-- Role Specification: Define the tutor's persona clearly to align responses with the learner's needs.
-
-- Topic and Level Customization: Integrate subject matter and proficiency level to tailor vocabulary and complexity.
-
-- Conversational Goals: Emphasize maintaining natural flow, limiting responses to 2-3 sentences for conciseness.
-
-- Error Correction Protocol: Upon detecting grammar mistakes, provide the corrected response first, followed by a distinct "💡 Correction:" note explaining the error.
-
-- Engagement Strategy: Conclude each response with a relevant follow-up question to encourage learner interaction.
-
-- Message Structure: Incorporate system-level instructions combined with recent conversational history and the current user input to maintain context.
-
-Leverage your advanced understanding of language pedagogy and AI prompt engineering to refine this framework, ensuring it maximizes learner engagement and language acquisition efficacy."""
+Persona: {persona}
+"""
+    
     msgs = [{"role": "system", "content": sys_prompt}] + history[-6:] + [{"role": "user", "content": user_input}]
+    
     try:
         response = client.chat.completions.create(model="gpt-4o-mini", messages=msgs)
-        return response.choices[0].message.content.strip()
-    except Exception as e: return "Sorry, I encountered an error."
+        full_response = response.choices[0].message.content.strip()
+        
+        # Parse the response
+        conversation_match = re.search(r'<conversation>(.*?)</conversation>', full_response, re.DOTALL)
+        correction_match = re.search(r'<correction>(.*?)</correction>', full_response, re.DOTALL)
+        
+        conversation = conversation_match.group(1).strip() if conversation_match else full_response
+        correction = correction_match.group(1).strip() if correction_match else None
+        
+        # Clean up empty or placeholder corrections
+        if correction and (len(correction) < 3 or correction.strip() in ['-', 'none', 'n/a', 'None', 'N/A']):
+            correction = None
+        
+        return {
+            "conversation": conversation,
+            "correction": correction
+        }
+    except Exception as e:
+        return {"conversation": "Sorry, I encountered an error.", "correction": None}
 
 def synthesize_speech(text, voice_name, language_code="en-US"):
     try:
@@ -362,6 +410,7 @@ def main():
             st.session_state.conversation_history = []
             st.session_state.last_audio_bytes = None
             st.session_state.audio_to_play = None
+            st.session_state.play_correction_audio = None
             st.session_state.text_input_key = "reset_text_input"
             st.rerun()
         if st.button("Logout", type="primary"):
@@ -369,15 +418,48 @@ def main():
             st.rerun()
 
     # --- Chat History ---
-    for msg in st.session_state.messages:
-        bg = "#e3f2fd" if msg["role"] == "user" else "#f5f5f5"
-        st.markdown(f"<div style='background:{bg};padding:10px;border-radius:10px;margin:5px 0; color: black'><b>{msg['role'].title()}:</b> {msg['content']}</div>", unsafe_allow_html=True)
+    for idx, msg in enumerate(st.session_state.messages):
+        if msg["role"] == "user":
+            bg = "#e3f2fd"
+            st.markdown(f"<div style='background:{bg};padding:10px;border-radius:10px;margin:5px 0; color: black'><b>You:</b> {msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            # Assistant message with potential correction
+            content = msg['content']
+            if isinstance(content, dict):
+                # New format with separate conversation and correction
+                conversation = content.get('conversation', '')
+                correction = content.get('correction', None)
+                
+                # Display conversation part
+                st.markdown(f"<div style='background:#f5f5f5;padding:10px;border-radius:10px;margin:5px 0; color: black'><b>Tutor:</b> {conversation}</div>", unsafe_allow_html=True)
+                
+                # Display correction in expandable section if present
+                if correction:
+                    with st.expander("💡 Grammar Tip (click to view)", expanded=False):
+                        st.markdown(f"<div style='background:#fff3cd;padding:10px;border-radius:5px; color: black'>{correction}</div>", unsafe_allow_html=True)
+                        # Add button to hear correction
+                        correction_key = f"correction_{idx}_{content.get('timestamp', time.time())}"
+                        if st.button("🔊 Hear this correction", key=f"btn_{correction_key}"):
+                            st.session_state.play_correction_audio = {'text': correction, 'key': correction_key}
+                            st.rerun()
+            else:
+                # Old format (plain text) - for backward compatibility
+                st.markdown(f"<div style='background:#f5f5f5;padding:10px;border-radius:10px;margin:5px 0; color: black'><b>Tutor:</b> {content}</div>", unsafe_allow_html=True)
 
     # --- Audio Playback Logic ---
-    # We check if there is audio waiting to be played from the previous run
+    # 1. Play conversation audio if waiting
     if st.session_state.audio_to_play:
         autoplay_audio(st.session_state.audio_to_play)
-        st.session_state.audio_to_play = None  # Clear it so it plays only once
+        st.session_state.audio_to_play = None
+    
+    # 2. Play correction audio if user clicked the button
+    if st.session_state.play_correction_audio:
+        correction_data = st.session_state.play_correction_audio
+        language_code = "fr-FR" if language == "French" else "en-US"
+        correction_audio = synthesize_speech(correction_data['text'], voice, language_code)
+        if correction_audio:
+            autoplay_audio(correction_audio)
+        st.session_state.play_correction_audio = None
 
     # --- Input Area ---
     st.markdown("---")
@@ -415,14 +497,23 @@ def main():
         st.session_state.conversation_history.append({"role": "user", "content": user_msg})
         
         with st.spinner("Thinking..."):
-            # Get text response
-            reply = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level, language)
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            st.session_state.conversation_history.append({"role": "assistant", "content": reply})
+            # Get AI response (now returns dict with conversation and correction)
+            response_data = get_ai_response(user_msg, st.session_state.conversation_history, persona, topic, level, language)
+            
+            # Add timestamp for unique keys
+            response_data['timestamp'] = time.time()
+            
+            # Store the full response data in messages
+            st.session_state.messages.append({"role": "assistant", "content": response_data})
+            
+            # For conversation history, only store the conversation part (not corrections)
+            # This keeps the conversation flowing naturally
+            conversation_text = response_data.get('conversation', '')
+            st.session_state.conversation_history.append({"role": "assistant", "content": conversation_text})
 
-            # Get audio response using the sidebar voice setting
+            # Generate audio ONLY for the conversation part (not corrections)
             language_code = "fr-FR" if language == "French" else "en-US"
-            audio_bytes = synthesize_speech(reply, voice, language_code)
+            audio_bytes = synthesize_speech(conversation_text, voice, language_code)
             
             # SAVE AUDIO TO STATE TO PLAY ON NEXT RELOAD
             if audio_bytes:
