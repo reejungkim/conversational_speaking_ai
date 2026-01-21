@@ -293,7 +293,7 @@ IMPORTANT RULES:
 2. The <conversation> section should flow naturally as if nothing was wrong
 3. Keep the conversation going - ask follow-up questions, show interest
 4. The <correction> section is COMPLETELY SEPARATE - only grammar fixes go there
-5. If there are no errors, leave <correction> empty or write just a dash: -
+5. If there are no errors, leave <correction> empty 
 6. Do NOT mix conversation and correction - they are separate sections
 
 Example 1 (with error):
@@ -310,9 +310,6 @@ User: "I went to the store yesterday"
 <conversation>
 Oh nice! What did you buy at the store? I love shopping too.
 </conversation>
-<correction>
--
-</correction>
 
 Topic: {topic}
 Level: {level}
