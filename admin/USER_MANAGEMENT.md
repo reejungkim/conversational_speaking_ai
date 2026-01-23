@@ -42,7 +42,7 @@ After creating the table, add your first admin user by running this SQL:
 INSERT INTO users (username, password_hash, email, full_name, is_admin, is_active)
 VALUES (
     'admin',
-    'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f',  -- password: password123
+    'e',
     'admin@example.com',
     'Administrator',
     true,
