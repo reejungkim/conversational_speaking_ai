@@ -224,11 +224,3 @@ Create a **Progressive Web App (PWA)**:
 5. **Test on real devices** (iPhone + Android phone)
 6. **Submit to app stores**
 
----
-
-## Questions for You
-
-1. Do you have a preference for React Native vs Flutter?
-2. What's your target timeline for launch?
-3. Do you want to maintain the Streamlit web app alongside mobile apps?
-4. Any specific mobile features you want prioritized (offline mode, push notifications, etc.)?

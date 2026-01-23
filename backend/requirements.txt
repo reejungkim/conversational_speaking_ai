@@ -1,0 +1,28 @@
+# FastAPI Backend for AI Language Tutor Mobile App
+
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Auth & Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+httpx>=0.25.0
+
+# Supabase
+supabase>=2.25.0
+
+# OpenAI
+openai>=1.12.0
+
+# Google Cloud
+google-cloud-speech>=2.21.0
+google-cloud-texttospeech>=2.14.1
+
+# CORS
+python-multipart>=0.0.6
+
+# Payments (for future use)
+# stripe>=7.0.0
